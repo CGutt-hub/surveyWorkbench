@@ -1,0 +1,482 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[german,english]{babel}
+\usepackage{geometry}
+\geometry{a4paper, margin=2.5cm, headheight=15pt}
+\usepackage{hyperref}
+\usepackage{graphicx}
+\usepackage{enumitem}
+\usepackage{tocloft}
+\usepackage{fancyhdr}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{pmboxdraw}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    urlcolor=blue,
+    pdftitle={Survey Workbench v2.0 - User Manual},
+    pdfauthor={}
+}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{Survey Workbench v2.0}
+\fancyhead[R]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+\title{\textbf{Survey Workbench v2.0}\\[0.5em]\Large User Manual}
+\author{}
+\date{February 2026}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{empty}
+
+\vfill
+\begin{center}
+\textit{Version 2.0 -- Internal Use Only}
+\end{center}
+\newpage
+
+\tableofcontents
+\newpage
+
+\section{Overview}
+
+The Survey Workbench is a comprehensive tool for managing participant folders and extracting survey data from questionnaires. Version 2.0 introduces dynamic questionnaire support, allowing unlimited questionnaire types per participant.
+
+\subsection{Key Features}
+\begin{itemize}
+    \item Dynamic questionnaire configuration (unlimited types)
+    \item Automated participant folder generation
+    \item Data extraction from completed questionnaires to Excel
+    \item Configuration save/load system
+    \item Individual questionnaire customization
+    \item Memory-optimized processing
+\end{itemize}
+
+\subsection{System Requirements}
+\begin{itemize}
+    \item Windows 10/11
+    \item Microsoft Excel (for data extraction)
+    \item Sufficient disk space for participant folders
+\end{itemize}
+
+\section{Getting Started}
+
+When you first launch Survey Workbench v2.0, you'll see the main window with two primary sections:
+
+\begin{enumerate}
+    \item \textbf{Generate Participant Folder} -- Creates organized folders with questionnaires
+    \item \textbf{Extract Data} -- Reads completed questionnaires and appends to masterfile (CSV, XLS, or XLSX)
+\end{enumerate}
+
+\section{Generate Participant Folder}
+
+This section allows you to create standardized participant folders with multiple questionnaire types.
+
+\subsection{Step-by-Step Guide}
+
+\subsubsection{Step 1: Enter Participant ID}
+Enter a unique identifier for the participant (e.g., ``WaS3\_001'').
+
+\begin{itemize}
+    \item This ID will be used in folder and file names
+    \item Use consistent naming across all participants
+    \item The field cannot be empty
+\end{itemize}
+
+\subsubsection{Step 2: Select Target Folder}
+\begin{enumerate}
+    \item Click \textbf{Search} next to ``Target folder PATH''
+    \item Choose where participant folders will be created
+    \item Example: \texttt{C:\textbackslash Studies\textbackslash WaS3\textbackslash Participants}
+\end{enumerate}
+
+\subsubsection{Step 3: Configure Questionnaire Types}
+\begin{enumerate}
+    \item Enter the number of different questionnaire types needed
+    \item Click \textbf{Confirm} to create configuration rows
+\end{enumerate}
+
+A scrollable area will appear with configuration fields for each questionnaire type.
+
+\subsubsection{Step 4: Configure Each Questionnaire}
+
+For each questionnaire type, you'll configure three parameters:
+
+\paragraph{Survey Name:}
+\begin{itemize}
+    \item Enter the questionnaire identifier (e.g., ``demographics'', ``nasa1'', ``comments'')
+    \item This name will be part of the output filename
+    \item Use descriptive, consistent names
+\end{itemize}
+
+\paragraph{Template PATH:}
+\begin{itemize}
+    \item Click \textbf{Search} to select the PDF template file
+    \item Example: \texttt{C:\textbackslash Templates\textbackslash WaS3\_demographics.pdf}
+    \item Template must be a valid PDF file
+\end{itemize}
+
+\paragraph{Number of copies:}
+\begin{itemize}
+    \item Enter how many copies of this questionnaire to create
+    \item Default is 1
+    \item Use multiple copies for repeated measures (e.g., 8 copies for NASA-TLX)
+\end{itemize}
+
+\subsubsection{Step 5: Generate Folder}
+
+Click \textbf{Generate Participant Folder}. The system will:
+
+\begin{enumerate}
+    \item Create a folder named with the Participant ID
+    \item Copy all questionnaires with standardized naming
+    \item Open the folder automatically
+\end{enumerate}
+
+\subsection{File Naming Convention}
+
+\begin{itemize}
+    \item Single copy: \texttt{\{ParticipantID\}\_\{SurveyName\}.pdf}
+    \item Multiple copies: \texttt{\{ParticipantID\}\_\{SurveyName\}1.pdf}, \texttt{\{ParticipantID\}\_\{SurveyName\}2.pdf}, etc.
+\end{itemize}
+
+\subsection{Example Output}
+
+\begin{verbatim}
+WaS3_001/
+├── WaS3_001_demographics.pdf
+├── WaS3_001_nasa1.pdf
+├── WaS3_001_nasa2.pdf
+├── WaS3_001_nasa3.pdf
+├── WaS3_001_nasa4.pdf
+├── WaS3_001_nasa5.pdf
+├── WaS3_001_nasa6.pdf
+├── WaS3_001_nasa7.pdf
+├── WaS3_001_nasa8.pdf
+└── WaS3_001_comments.pdf
+\end{verbatim}
+
+\section{Extract Data}
+
+This section reads completed questionnaire data and appends it to a masterfile. The system automatically detects the format (CSV, XLS, or XLSX) from your selected file and uses the appropriate method.
+
+\subsection{Prerequisites}
+
+\begin{itemize}
+    \item Completed questionnaires must have ``\_Extract Data.csv'' files
+    \item CSV files must be in the participant folder
+    \item A masterfile must exist (.csv, .xls, or .xlsx format)
+    \item The masterfile will be updated with new participant data
+\end{itemize}
+
+\subsection{Step-by-Step Guide}
+
+\subsubsection{Step 1: Select Source Folder}
+\begin{enumerate}
+    \item Click \textbf{Search} next to ``Source folder PATH''
+    \item Choose the folder containing participant folders
+    \item Example: \texttt{C:\textbackslash Studies\textbackslash WaS3\textbackslash Completed}
+\end{enumerate}
+
+\subsubsection{Step 2: Select Masterfile}
+\begin{enumerate}
+    \item Click \textbf{Search} next to ``Masterfile PATH''
+    \item Choose your masterfile (.csv, .xls, or .xlsx)
+    \item The system will auto-detect the format and use the appropriate extraction method
+\end{enumerate}
+
+\subsubsection{Step 3: Enter Participant ID}
+\begin{itemize}
+    \item Enter the ID of the participant whose data you want to extract
+    \item Must match the folder name exactly
+    \item Case-sensitive
+\end{itemize}
+
+\subsubsection{Step 4: Extract Data}
+
+Click \textbf{Extract Data to Masterfile}. The system will automatically detect your file format and proceed accordingly:
+
+\paragraph{For CSV files (.csv)}
+\begin{enumerate}
+    \item Find all \texttt{*\_Extract Data.csv} files in the participant folder
+    \item Read data from each CSV file
+    \item Append a new row to the CSV masterfile
+    \item Merge column headers if new fields appear
+    \item Save the updated file
+\end{enumerate}
+
+\paragraph{For Excel files (.xls or .xlsx)}
+\begin{enumerate}
+    \item Find all \texttt{*\_Extract Data.csv} files in the participant folder
+    \item Read data from each CSV file
+    \item Open the Excel masterfile
+    \item Find the next empty row
+    \item Write participant ID and all extracted data
+    \item Create column headers if this is the first row
+    \item Save the file (XLS files stay as .xls, XLSX stay as .xlsx)
+\end{enumerate}
+
+\subsection{Choosing Masterfile Format}
+
+\textbf{Use CSV (.csv) when:}
+\begin{itemize}
+    \item You want a universal, plain-text format
+    \item You plan to import data into R, Python, SPSS, or other analysis tools
+    \item You need maximum compatibility across platforms and software
+    \item You want human-readable, version-control-friendly files
+    \item File size is a concern (CSV is smaller)
+\end{itemize}
+
+\textbf{Use Excel (.xls or .xlsx) when:}
+\begin{itemize}
+    \item You want to work directly in Excel with formulas/pivot tables
+    \item You need Excel-specific features (formatting, charts, multiple sheets)
+    \item Your workflow is primarily in Microsoft Excel
+    \item You're using older Excel versions (use .xls for Excel 2003 and earlier)
+    \item You're using newer Excel versions (use .xlsx for Excel 2007+)
+\end{itemize}
+
+\textbf{All formats:}
+\begin{itemize}
+    \item Append new participants as rows to the masterfile
+    \item Automatically merge column headers when new fields appear
+    \item Preserve all previous data in the masterfile
+    \item The tool auto-detects the format -- just select your file
+\end{itemize}
+
+\subsection{Data Organization}
+
+\begin{itemize}
+    \item Participant ID is written in the first column
+    \item Each CSV field gets a column named \texttt{\{SurveyType\}\_\{FieldName\}}
+    \item Example columns: \texttt{demographics\_Age}, \texttt{nasa1\_Mental\_Demand}, \texttt{nasa1\_Physical\_Demand}
+    \item Data is sorted alphabetically by column name
+    \item The ``File'' column from CSVs is automatically excluded
+\end{itemize}
+
+\subsubsection{Step 5: Verify Results}
+\begin{itemize}
+    \item A success message shows how many CSV files were processed
+    \item Check the Excel file to verify data was written correctly
+\end{itemize}
+
+\section{Configuration Management}
+
+Save and load your questionnaire configurations for repeated use.
+
+\subsection{Save Configuration}
+
+\begin{enumerate}
+    \item Set up your questionnaires in the Generate section
+    \item Go to \textbf{File $\rightarrow$ Save Configuration}
+    \item Enter a descriptive configuration name
+    \item Click \textbf{Save configuration}
+\end{enumerate}
+
+\subsubsection{What's Saved}
+
+\begin{itemize}
+    \item Target folder path
+    \item Number of questionnaire types
+    \item All questionnaire names, template paths, and copy counts
+    \item Source folder path (for extraction)
+    \item Excel file path (for extraction)
+\end{itemize}
+
+\subsubsection{Overwriting Configurations}
+
+If a configuration with the same name exists, you'll be asked to confirm:
+\begin{itemize}
+    \item Choose \textbf{Yes} to replace the old configuration
+    \item Choose \textbf{No} to cancel
+\end{itemize}
+
+\subsection{Load Configuration}
+
+\begin{enumerate}
+    \item Go to \textbf{File $\rightarrow$ Load/Delete Configuration}
+    \item Select a configuration from the dropdown
+    \item Click \textbf{Load configuration}
+\end{enumerate}
+
+All saved settings will be restored to the interface.
+
+\subsection{Delete Configuration}
+
+\begin{enumerate}
+    \item Go to \textbf{File $\rightarrow$ Load/Delete Configuration}
+    \item Select a configuration from the dropdown
+    \item Click \textbf{Delete configuration}
+    \item Confirm the deletion
+\end{enumerate}
+
+\section{Troubleshooting}
+
+\subsection{Common Error Messages}
+
+\subsubsection{``Please enter a participant ID!''}
+\begin{itemize}
+    \item Make sure you've entered an ID in the Participant ID field
+    \item The field cannot be empty
+\end{itemize}
+
+\subsubsection{``Please select a target folder!''}
+\begin{itemize}
+    \item Click Search and choose a valid folder
+    \item The folder must exist and be accessible
+\end{itemize}
+
+\subsubsection{``Please configure questionnaires!''}
+\begin{itemize}
+    \item Enter a number in ``Number of questionnaire types''
+    \item Click Confirm to create configuration rows
+\end{itemize}
+
+\subsubsection{``Participant folder not found''}
+\begin{itemize}
+    \item Verify the Source folder is correct
+    \item Check that the Participant ID matches the folder name exactly
+    \item Folder names are case-sensitive
+\end{itemize}
+
+\subsubsection{``No Extract Data CSV files found''}
+\begin{itemize}
+    \item Check that questionnaires have been processed
+    \item CSV files must end with ``\_Extract Data.csv''
+    \item Verify files are in the participant folder
+\end{itemize}
+
+\subsubsection{``Folder already exists. Overwrite?''}
+\begin{itemize}
+    \item Choose \textbf{Yes} to replace existing files
+    \item Choose \textbf{No} to cancel and preserve existing data
+\end{itemize}
+
+\subsection{Excel-Related Issues}
+
+\begin{itemize}
+    \item Ensure Excel is installed and accessible
+    \item Close the Excel file if it's already open
+    \item Check file permissions
+    \item Verify the Excel file is not corrupted
+\end{itemize}
+
+\subsection{Best Practices}
+
+\subsubsection{Use Consistent Naming}
+\begin{itemize}
+    \item Use the same participant ID format across all participants
+    \item Example: WaS3\_001, WaS3\_002, WaS3\_003, etc.
+    \item Avoid special characters in IDs
+\end{itemize}
+
+\subsubsection{Organize Templates}
+\begin{itemize}
+    \item Keep all questionnaire templates in one folder
+    \item Use descriptive filenames
+    \item Maintain backups of template files
+\end{itemize}
+
+\subsubsection{Save Configurations}
+\begin{itemize}
+    \item Create configurations for each study type
+    \item Use descriptive configuration names
+    \item Update configurations when templates change
+\end{itemize}
+
+\subsubsection{Backup Data}
+\begin{itemize}
+    \item Regularly backup your Excel data files
+    \item Keep copies of completed questionnaires
+    \item Use version control for configuration files
+\end{itemize}
+
+\subsubsection{Test First}
+\begin{itemize}
+    \item Test with a sample participant before processing real data
+    \item Verify Excel output is formatted correctly
+    \item Check all questionnaire templates load correctly
+\end{itemize}
+
+\section{Advanced Features}
+
+\subsection{Multiple Questionnaire Copies}
+
+When you need repeated measures:
+\begin{enumerate}
+    \item Set ``Number of copies'' to the desired amount
+    \item Files will be numbered sequentially: \texttt{name1.pdf}, \texttt{name2.pdf}, etc.
+    \item Useful for: NASA-TLX repeated measures, multiple trials, time-series data
+\end{enumerate}
+
+\subsection{Custom Excel Sheets}
+
+The extraction looks for a sheet named ``Data'':
+\begin{itemize}
+    \item If found, data is written to this sheet
+    \item If not found, data is written to the first sheet
+    \item Headers are created automatically on the first row
+    \item Existing headers are preserved and matched
+\end{itemize}
+
+\subsection{File Column Filtering}
+
+The extraction automatically skips any column named ``File'' from CSV data to avoid redundant path information.
+
+\section{Technical Information}
+
+\subsection{Version History}
+
+\subsubsection{v2.0 (February 2026)}
+\begin{itemize}
+    \item Dynamic questionnaire support (unlimited types)
+    \item Individual configuration per questionnaire
+    \item Improved data extraction algorithm
+    \item Enhanced error handling
+    \item Configuration save/load system
+    \item Memory-optimized processing
+    \item Comprehensive type hints
+\end{itemize}
+
+\subsubsection{v1.2 (Previous)}
+\begin{itemize}
+    \item Fixed questionnaire count
+    \item Basic data extraction
+    \item Simple configuration
+\end{itemize}
+
+\subsection{Credits}
+
+\begin{tabular}{ll}
+\textbf{Version:} & 2.0 \\
+\textbf{Release Date:} & February 2026 \\
+\end{tabular}
+
+\subsection{Technology Stack}
+
+\begin{itemize}
+    \item Python 3.13.7
+    \item PyQt5 5.15.11 (GUI framework)
+    \item xlwings 0.33.20 (Excel integration)
+    \item PyInstaller 6.14.2 (Executable packaging)
+\end{itemize}
+
+\section{Support and Contact}
+
+For technical support or feature requests, please refer to your organization's support channels.
+
+\vfill
+\begin{center}
+\rule{0.5\textwidth}{0.4pt}\\[0.5em]
+\textit{Survey Workbench v2.0 -- User Manual}\\[0.5em]
+\textit{February 2026}
+\end{center}
+
+\end{document}
