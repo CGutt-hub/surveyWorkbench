@@ -784,16 +784,20 @@ class MainWindow(QMainWindow):
                 for i, value in enumerate(flat_values, start=1):
                     sheet.range(next_row, i).value = value  # type: ignore[misc]
 
-            # Save as xlsx (new format); convert .xls to .xlsx if needed
-            if not self.excel_path.lower().endswith('.xlsx'):
-                xlsx_path = self.excel_path.rsplit('.', 1)[0] + '.xlsx'
-                cast(xlw.Book, wb).save(xlsx_path)  # type: ignore[misc]
-                wb.close()  # type: ignore[misc]
-                wb_closed = True
+            # Always save as .xlsx (FileFormat 51 = xlOpenXMLWorkbook).
+            # Suppress Excel's format-conversion dialog when the source was .xls.
+            xlsx_path = (self.excel_path if self.excel_path.lower().endswith('.xlsx')
+                         else self.excel_path.rsplit('.', 1)[0] + '.xlsx')
+            wb.app.display_alerts = False  # type: ignore[misc]
+            try:
+                wb.api.SaveAs(Filename=xlsx_path, FileFormat=51)  # type: ignore[misc]
+            finally:
+                wb.app.display_alerts = True  # type: ignore[misc]
+            wb.close()  # type: ignore[misc]
+            wb_closed = True
+            if xlsx_path != self.excel_path:
                 self.excel_path = xlsx_path
                 self.excel_pathset.setText(xlsx_path)
-            else:
-                cast(xlw.Book, wb).save()  # type: ignore[misc]
 
         finally:
             if not wb_closed:
