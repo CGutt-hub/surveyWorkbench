@@ -42,17 +42,14 @@ import xlwings as xlw  # type: ignore[import]
 
 
 def _parse_field_name(field_name: str) -> Optional[tuple[str, int, Optional[int]]]:
-    """Parse a form field name following the (_)NameX(_N) convention.
+    """Parse a form field name following the NameX(_N) convention.
 
     Returns (field_type, group, option) where:
       field_type : 'text' or 'check'
       group      : integer X
       option     : integer N for Check fields, None for Text fields
-    Returns None for fields that should be skipped (underscore-prefixed or
-    not matching the convention).
+    Returns None for fields not matching the convention.
     """
-    if field_name.startswith('_'):
-        return None
     text_match = re.fullmatch(r'Text(\d+)', field_name)
     if text_match:
         return ('text', int(text_match.group(1)), None)
@@ -660,8 +657,8 @@ class MainWindow(QMainWindow):
     def _process_form_fields(self, raw_fields: Dict[str, str]) -> Dict[str, Any]:
         """Transform raw form field key-value pairs into output columns.
 
-        Rules (based on the (_)NameX(_N) naming convention):
-          - Fields prefixed with '_' or not matching the convention are skipped.
+        Rules (based on the NameX(_N) naming convention):
+          - Fields not matching the convention are skipped.
           - TextX        -> one column 'TextX' with the raw string value.
           - CheckX_N     -> one column 'CheckX': the N of whichever option is
                            selected (e.g. Check1_2 checked -> 2, Check2_0 checked
