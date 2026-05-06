@@ -42,10 +42,7 @@ import xlwings as xlw  # type: ignore[import]
 
 
 def _parse_field_name(field_name: str) -> Optional[tuple[str, int, Optional[str]]]:
-    """Parse a form field name following the NameX(_S)(_n) convention.
-
-    A trailing '_n' (or '_N') annotation is stripped before matching; it has no
-    effect on extraction.
+    """Parse a form field name following the NameX(_S) convention.
 
     Returns (field_type, group, option) where:
       field_type : 'text' or 'check'
@@ -53,12 +50,10 @@ def _parse_field_name(field_name: str) -> Optional[tuple[str, int, Optional[str]
       option     : option suffix string S for Check fields, None for Text fields
     Returns None for fields not matching the convention.
     """
-    # Strip trailing _n / _N annotation (used by form designers, ignored here)
-    name = re.sub(r'_[nN]$', '', field_name)
-    text_match = re.fullmatch(r'Text(\d+)', name)
+    text_match = re.fullmatch(r'Text(\d+)', field_name)
     if text_match:
         return ('text', int(text_match.group(1)), None)
-    check_match = re.fullmatch(r'Check(\d+)_([A-Za-z0-9]+)', name)
+    check_match = re.fullmatch(r'Check(\d+)_([A-Za-z0-9]+)', field_name)
     if check_match:
         return ('check', int(check_match.group(1)), check_match.group(2))
     return None

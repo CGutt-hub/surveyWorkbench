@@ -198,7 +198,7 @@ WaS3_001/
 Survey Workbench recognises the type of each form field by its name. Every field in a questionnaire form must follow this structure:
 
 \begin{center}
-\texttt{NameX(\_S)(\_n)}
+\texttt{NameX(\_S)}
 \end{center}
 
 Variables in parentheses are optional.
@@ -227,9 +227,7 @@ The first part of the field name indicates the \textbf{kind} of field:
     \item \textbf{Multiple choice:} Each option gets a unique suffix -- either sequential numbers (\texttt{1}, \texttt{2}, \texttt{3}) or descriptive letters (\texttt{m}, \texttt{w}, \texttt{d}).
 \end{itemize}
 
-\subsection{\_n -- Designer Annotation (optional)}
-
-A trailing \texttt{\_n} (or \texttt{\_N}) on any field name is silently stripped before parsing and has no effect on extraction. It is provided as a convenience for form designers who wish to annotate fields.
+Field names not matching exactly \texttt{TextX} or \texttt{CheckX\_S} are silently skipped.
 
 \subsection{How Field Types Are Extracted}
 
@@ -247,14 +245,14 @@ The field name determines how Survey Workbench writes the data into the masterfi
 \textbf{Field Name} & \textbf{Meaning} \\
 \hline
 \texttt{Text1}        & Free-text field, group 1 \\
-\texttt{Text5\_n}     & Free-text field, group 5 (\texttt{\_n} annotation stripped) \\
+\texttt{Text5\_n}     & Does NOT match -- skipped \\
 \texttt{Check1\_m}   & Checkbox, group 1, option ``m'' \\
 \texttt{Check1\_w}   & Checkbox, group 1, option ``w'' \\
 \texttt{Check3\_1}   & Checkbox, group 3, yes-option \\
 \texttt{Check3\_0}   & Checkbox, group 3, no-option \\
 \texttt{Check4\_1}   & Checkbox, group 4, option 1 (multiple choice) \\
 \texttt{Check4\_2}   & Checkbox, group 4, option 2 (multiple choice) \\
-\texttt{Check18\_1\_n} & Checkbox, group 18, option ``1'' (\texttt{\_n} stripped) \\
+\texttt{Check18\_1\_n} & Does NOT match -- skipped \\
 \end{tabular}
 
 \section{Extract Data}
