@@ -662,10 +662,10 @@ class MainWindow(QMainWindow):
 
         Rules (based on the (_)NameX(_N) naming convention):
           - Fields prefixed with '_' or not matching the convention are skipped.
-          - TextX  -> one column 'TextX' with the raw text value.
-          - CheckX with a _0 option (binary) -> one column 'CheckX': 1 (yes) or 0 (no).
-          - CheckX without a _0 option (multiple choice) -> one column 'CheckX':
-            the N number of the selected option, or None if nothing is selected.
+          - TextX        -> one column 'TextX' with the raw string value.
+          - CheckX_N     -> one column 'CheckX': the N of whichever option is
+                           selected (e.g. Check1_2 checked -> 2, Check2_0 checked
+                           -> 0, Check2_1 checked -> 1).  None if nothing selected.
         """
         check_groups: Dict[int, Dict[int, str]] = {}
         text_groups: Dict[int, str] = {}
@@ -688,14 +688,12 @@ class MainWindow(QMainWindow):
             result[f'Text{group}'] = value
 
         for group, options in check_groups.items():
-            if 0 in options:  # binary: _0 = no, _1 = yes
-                result[f'Check{group}'] = 1 if _is_checked(options.get(1, '')) else 0
-            else:  # multiple choice: value = N of the selected option
-                selected = next(
-                    (n for n in sorted(options) if _is_checked(options[n])),
-                    None
-                )
-                result[f'Check{group}'] = selected
+            # Always output N of the selected option (the number after the last _).
+            selected = next(
+                (n for n in sorted(options) if _is_checked(options[n])),
+                None
+            )
+            result[f'Check{group}'] = selected
 
         return result
 
@@ -761,7 +759,8 @@ class MainWindow(QMainWindow):
                     existing_headers.append(str(sheet.range(1, col_idx).value))  # type: ignore[misc]
                     col_idx += 1
 
-                # Find next empty data row (data rows start at row 2)
+                # Find next empty data row; row 1 is always the header row,
+                # so data starts at row 2 and never goes to row 1.
                 next_row = 2
                 while sheet.range(next_row, 1).value is not None:  # type: ignore[misc]
                     next_row += 1
