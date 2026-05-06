@@ -739,17 +739,19 @@ class MainWindow(QMainWindow):
             all_data = self._prepare_data_for_extraction(participant_id)
 
         wb: xlw.Book = xlw.Book(self.excel_path)
-        wb_closed = False
         try:
-            sheet_names: List[str] = [cast(str, s.name) for s in wb.sheets]  # type: ignore[misc]
+            # Build a case-insensitive map of existing sheet names: lower -> actual name
+            sheet_name_map: Dict[str, str] = {cast(str, s.name).lower(): cast(str, s.name) for s in wb.sheets}  # type: ignore[misc]
 
             for base_name, rows in all_data.items():
                 # Each questionnaire type gets its own sheet; create it if absent.
-                if base_name in sheet_names:
-                    sheet: xlw.Sheet = cast(xlw.Sheet, wb.sheets[base_name])
+                # Match case-insensitively so "nasa" finds an existing "NASA" sheet.
+                existing_name = sheet_name_map.get(base_name.lower())
+                if existing_name is not None:
+                    sheet: xlw.Sheet = cast(xlw.Sheet, wb.sheets[existing_name])
                 else:
                     sheet = cast(xlw.Sheet, wb.sheets.add(base_name))  # type: ignore[misc]
-                    sheet_names.append(base_name)
+                    sheet_name_map[base_name.lower()] = base_name
 
                 # Read existing column headers from row 1
                 existing_headers: List[str] = []
@@ -791,18 +793,13 @@ class MainWindow(QMainWindow):
                 wb.api.SaveAs(Filename=xlsx_path, FileFormat=51)  # type: ignore[misc]
             finally:
                 wb.app.display_alerts = True  # type: ignore[misc]
-            wb.close()  # type: ignore[misc]
-            wb_closed = True
+            # Leave workbook open so the user can verify the result.
             if xlsx_path != self.excel_path:
                 self.excel_path = xlsx_path
                 self.excel_pathset.setText(xlsx_path)
 
-        finally:
-            if not wb_closed:
-                try:
-                    wb.close()  # type: ignore[misc]
-                except Exception:
-                    pass
+        except Exception:
+            raise
     
     def readout_csv(self) -> None:
         """Extract data from participant folder to CSV with preview"""
