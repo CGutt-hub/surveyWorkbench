@@ -22,30 +22,29 @@
 \contentsline {section}{\numberline {4}Form Field Naming Convention}{7}{section.4}%
 \contentsline {subsection}{\numberline {4.1}Name}{7}{subsection.4.1}%
 \contentsline {subsection}{\numberline {4.2}X -- Field Group Number}{7}{subsection.4.2}%
-\contentsline {subsection}{\numberline {4.3}N -- Checkbox Option Number (Check only)}{7}{subsection.4.3}%
-\contentsline {subsection}{\numberline {4.4}\_ -- Not-Extracted Prefix}{7}{subsection.4.4}%
-\contentsline {subsection}{\numberline {4.5}How Field Types Are Extracted}{7}{subsection.4.5}%
-\contentsline {subsection}{\numberline {4.6}Naming Examples}{8}{subsection.4.6}%
+\contentsline {subsection}{\numberline {4.3}S -- Checkbox Option Suffix (Check only)}{7}{subsection.4.3}%
+\contentsline {subsection}{\numberline {4.4}How Field Types Are Extracted}{7}{subsection.4.4}%
+\contentsline {subsection}{\numberline {4.5}Naming Examples}{8}{subsection.4.5}%
 \contentsline {section}{\numberline {5}Extract Data}{8}{section.5}%
 \contentsline {subsection}{\numberline {5.1}Prerequisites}{8}{subsection.5.1}%
 \contentsline {subsection}{\numberline {5.2}Step-by-Step Guide}{8}{subsection.5.2}%
 \contentsline {subsubsection}{\numberline {5.2.1}Step 1: Select Source Folder}{8}{subsubsection.5.2.1}%
 \contentsline {subsubsection}{\numberline {5.2.2}Step 2: Select Masterfile}{8}{subsubsection.5.2.2}%
 \contentsline {subsubsection}{\numberline {5.2.3}Step 3: Enter Participant ID}{8}{subsubsection.5.2.3}%
-\contentsline {subsubsection}{\numberline {5.2.4}Step 4: Extract Data}{8}{subsubsection.5.2.4}%
+\contentsline {subsubsection}{\numberline {5.2.4}Step 4: Extract Data}{9}{subsubsection.5.2.4}%
 \contentsline {paragraph}{For CSV files (.csv)}{9}{section*.4}%
 \contentsline {paragraph}{For Excel files (.xls or .xlsx)}{9}{section*.5}%
 \contentsline {subsection}{\numberline {5.3}Choosing Masterfile Format}{9}{subsection.5.3}%
 \contentsline {subsection}{\numberline {5.4}Data Organization}{10}{subsection.5.4}%
 \contentsline {subsubsection}{\numberline {5.4.1}Step 5: Preview and Verify}{10}{subsubsection.5.4.1}%
 \contentsline {subsection}{\numberline {5.5}Duplicate Detection}{10}{subsection.5.5}%
-\contentsline {subsection}{\numberline {5.6}Data Completeness Check}{10}{subsection.5.6}%
+\contentsline {subsection}{\numberline {5.6}Data Completeness Check}{11}{subsection.5.6}%
 \contentsline {subsection}{\numberline {5.7}Batch Mode (Extraction)}{11}{subsection.5.7}%
 \contentsline {subsection}{\numberline {5.8}Missing Data Report}{11}{subsection.5.8}%
 \contentsline {section}{\numberline {6}Configuration Management}{11}{section.6}%
 \contentsline {subsection}{\numberline {6.1}Save Configuration}{11}{subsection.6.1}%
 \contentsline {subsubsection}{\numberline {6.1.1}What's Saved}{11}{subsubsection.6.1.1}%
-\contentsline {subsubsection}{\numberline {6.1.2}Overwriting Configurations}{11}{subsubsection.6.1.2}%
+\contentsline {subsubsection}{\numberline {6.1.2}Overwriting Configurations}{12}{subsubsection.6.1.2}%
 \contentsline {subsection}{\numberline {6.2}Load Configuration}{12}{subsection.6.2}%
 \contentsline {subsection}{\numberline {6.3}Delete Configuration}{12}{subsection.6.3}%
 \contentsline {section}{\numberline {7}Troubleshooting}{12}{section.7}%
@@ -54,7 +53,7 @@
 \contentsline {subsubsection}{\numberline {7.1.2}``Please select a target folder!''}{12}{subsubsection.7.1.2}%
 \contentsline {subsubsection}{\numberline {7.1.3}``Please configure questionnaires!''}{12}{subsubsection.7.1.3}%
 \contentsline {subsubsection}{\numberline {7.1.4}``Participant folder not found''}{12}{subsubsection.7.1.4}%
-\contentsline {subsubsection}{\numberline {7.1.5}``No Extract Data CSV files found''}{12}{subsubsection.7.1.5}%
+\contentsline {subsubsection}{\numberline {7.1.5}``No Extract Data CSV files found''}{13}{subsubsection.7.1.5}%
 \contentsline {subsubsection}{\numberline {7.1.6}``Folder already exists. Overwrite?''}{13}{subsubsection.7.1.6}%
 \contentsline {subsection}{\numberline {7.2}Excel-Related Issues}{13}{subsection.7.2}%
 \contentsline {subsection}{\numberline {7.3}Best Practices}{13}{subsection.7.3}%
@@ -62,15 +61,15 @@
 \contentsline {subsubsection}{\numberline {7.3.2}Organize Templates}{13}{subsubsection.7.3.2}%
 \contentsline {subsubsection}{\numberline {7.3.3}Save Configurations}{13}{subsubsection.7.3.3}%
 \contentsline {subsubsection}{\numberline {7.3.4}Backup Data}{13}{subsubsection.7.3.4}%
-\contentsline {subsubsection}{\numberline {7.3.5}Test First}{13}{subsubsection.7.3.5}%
+\contentsline {subsubsection}{\numberline {7.3.5}Test First}{14}{subsubsection.7.3.5}%
 \contentsline {section}{\numberline {8}Advanced Features}{14}{section.8}%
 \contentsline {subsection}{\numberline {8.1}What's This? Help Mode}{14}{subsection.8.1}%
 \contentsline {subsection}{\numberline {8.2}Multiple Questionnaire Copies}{14}{subsection.8.2}%
 \contentsline {subsection}{\numberline {8.3}Per-Type Excel Sheets}{14}{subsection.8.3}%
 \contentsline {subsection}{\numberline {8.4}File Column Filtering}{14}{subsection.8.4}%
-\contentsline {section}{\numberline {9}Technical Information}{14}{section.9}%
-\contentsline {subsection}{\numberline {9.1}Version History}{14}{subsection.9.1}%
-\contentsline {subsubsection}{\numberline {9.1.1}v2.0 (February 2026)}{14}{subsubsection.9.1.1}%
+\contentsline {section}{\numberline {9}Technical Information}{15}{section.9}%
+\contentsline {subsection}{\numberline {9.1}Version History}{15}{subsection.9.1}%
+\contentsline {subsubsection}{\numberline {9.1.1}v2.0 (February 2026)}{15}{subsubsection.9.1.1}%
 \contentsline {subsubsection}{\numberline {9.1.2}v1.2 (Previous)}{15}{subsubsection.9.1.2}%
 \contentsline {subsection}{\numberline {9.2}Credits}{15}{subsection.9.2}%
 \contentsline {subsection}{\numberline {9.3}Technology Stack}{15}{subsection.9.3}%

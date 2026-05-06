@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.25 (MiKTeX 24.1) (preloaded format=pdflatex 2025.3.6)  6 MAY 2026 17:56
+This is pdfTeX, Version 3.141592653-2.6-1.40.25 (MiKTeX 24.1) (preloaded format=pdflatex 2025.3.6)  6 MAY 2026 18:44
 entering extended mode
  \write18 enabled.
  file:line:error style messages enabled.
@@ -565,31 +565,26 @@ Overfull \hbox (32.69855pt too wide) in paragraph at lines 177--178
 []\T1/cmr/m/n/10.95 Multiple copies: \T1/cmtt/m/n/10.95 {ParticipantID}_{SurveyName}1.pdf\T1/cmr/m/n/10.95 , \T1/cmtt/m/n/10.95 {ParticipantID}_{SurveyName}2.pdf\T1/cmr/m/n/10.95 ,
  []
 
-[6]
-Overfull \hbox (35.49274pt too wide) in paragraph at lines 238--239
-\T1/cmr/m/n/10.95 empty. Ex-am-ples: \T1/cmtt/m/n/10.95 Check2_0 \T1/cmr/m/n/10.95 se-lected $\OMS/cmsy/m/n/10.95 )$ \T1/cmtt/m/n/10.95 0\T1/cmr/m/n/10.95 ; \T1/cmtt/m/n/10.95 Check1_2 \T1/cmr/m/n/10.95 se-lected $\OMS/cmsy/m/n/10.95 )$ \T1/cmtt/m/n/10.95 2\T1/cmr/m/n/10.95 ; bi-nary pair \T1/cmtt/m/n/10.95 Check3_0\T1/cmr/m/n/10.95 /\T1/cmtt/m/n/10.95 Check3_1
- []
-
-[7] [8] [9] [10] [11] [12] [13] [14] [15] (USER_MANUAL.aux)
+[6] [7] [8] [9] [10] [11] [12] [13] [14] [15] (USER_MANUAL.aux)
  ***********
 LaTeX2e <2023-11-01> patch level 1
 L3 programming layer <2024-01-04>
  ***********
 Package rerunfilecheck Info: File `USER_MANUAL.out' has not changed.
-(rerunfilecheck)             Checksum: 6418C86403768A0A567A63ACFC9F3402;12245.
+(rerunfilecheck)             Checksum: 52B50B6606A6202E78A0E29DD283F795;12052.
  ) 
 Here is how much of TeX's memory you used:
- 13765 strings out of 474486
- 217663 string characters out of 5741396
+ 13763 strings out of 474486
+ 217633 string characters out of 5741396
  1942542 words of memory out of 5000000
- 35731 multiletter control sequences out of 15000+600000
+ 35730 multiletter control sequences out of 15000+600000
  569245 words of font info for 59 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
- 75i,11n,79p,555b,600s stack positions out of 10000i,1000n,20000p,200000b,200000s
+ 75i,11n,79p,560b,600s stack positions out of 10000i,1000n,20000p,200000b,200000s
  <C:\Users\WasStudent\AppData\Local\MiKTeX\fonts/pk/ljfour/jknappen/ec/dpi600\ectt1095.pk> <C:\Users\WasStudent\AppData\Local\MiKTeX\fonts/pk/ljfour/jknappen/ec/dpi600\tcrm1095.pk> <C:\Users\WasStudent\AppData\Local\MiKTeX\fonts/pk/ljfour/jknappen/ec/dpi600\ecbx1200.pk> <C:\Users\WasStudent\AppData\Local\MiKTeX\fonts/pk/ljfour/jknappen/ec/dpi600\ecrm1095.pk> <C:\Users\WasStudent\AppData\Local\MiKTeX\fonts/pk/ljfour/jknappen/ec/dpi600\ecbx1095.pk> <C:\Users\WasStudent\AppData\Local\MiKTeX\fonts/pk/ljfour/jknappen/ec/dpi600\ecbx1440.pk> <C:\Users\WasStudent\AppData\Local\MiKTeX\fonts/pk/ljfour/jknappen/ec/dpi600\ecti1095.pk> <C:\Users\WasStudent\AppData\Local\MiKTeX\fonts/pk/ljfour/jknappen/ec/dpi600\ecrm1200.pk> <C:\Users\WasStudent\AppData\Local\MiKTeX\fonts/pk/ljfour/jknappen/ec/dpi600\ecrm1440.pk> <C:\Users\WasStudent\AppData\Local\MiKTeX\fonts/pk/ljfour/jknappen/ec/dpi600\ecbx1728.pk><C:/Users/WasStudent/AppData/Local/Programs/MiKTeX/fonts/type1/public/amsfonts/cm/cmsy10.pfb>
-Output written on USER_MANUAL.pdf (15 pages, 227931 bytes).
+Output written on USER_MANUAL.pdf (15 pages, 228477 bytes).
 PDF statistics:
- 942 PDF objects out of 1000 (max. 8388607)
- 151 named destinations out of 1000 (max. 500000)
- 569 words of extra memory for PDF output out of 10000 (max. 10000000)
+ 939 PDF objects out of 1000 (max. 8388607)
+ 150 named destinations out of 1000 (max. 500000)
+ 561 words of extra memory for PDF output out of 10000 (max. 10000000)
 

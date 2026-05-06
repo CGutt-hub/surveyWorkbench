@@ -1,5 +1,5 @@
 # Fdb version 4
-["pdflatex"] 1778082978.96991 "c:/Users/WasStudent/Desktop/WaS stuff/repoShaggy/surveyWorkbench/USER_MANUAL.tex" "USER_MANUAL.pdf" "USER_MANUAL" 1778082980.11918 0
+["pdflatex"] 1778085867.0961 "c:/Users/WasStudent/Desktop/WaS stuff/repoShaggy/surveyWorkbench/USER_MANUAL.tex" "USER_MANUAL.pdf" "USER_MANUAL" 1778085868.21428 0
   "C:/Users/WasStudent/AppData/Local/MiKTeX/fonts/map/pdftex/pdftex.map" 1771860049 122695 284aa43fd9596bfdbe93b5e0c6c5df4b ""
   "C:/Users/WasStudent/AppData/Local/MiKTeX/fonts/pk/ljfour/jknappen/ec/dpi600/ecbx1095.pk" 1770119618 28976 f059a256fde6165ce220cc87e202f5bc ""
   "C:/Users/WasStudent/AppData/Local/MiKTeX/fonts/pk/ljfour/jknappen/ec/dpi600/ecbx1200.pk" 1770126737 31952 cac2b788ca3f2f1dc5bb990f0c26e841 ""
@@ -104,11 +104,11 @@
   "C:/Users/WasStudent/AppData/Local/Programs/MiKTeX/tex/latex/tocloft/tocloft.sty" 1578908763 37263 3e78d14f0f4b1a30560fea5e04de805d ""
   "C:/Users/WasStudent/AppData/Local/Programs/MiKTeX/tex/latex/url/url.sty" 1388490452 12796 8edb7d69a20b857904dd0ea757c14ec9 ""
   "C:/Users/WasStudent/AppData/Local/Programs/MiKTeX/tex/latex/xcolor/xcolor.sty" 1700127522 55487 80a65caedd3722f4c20a14a69e785d8f ""
-  "USER_MANUAL.aux" 1778082979 10102 1b4d5dc3699442a6cc0ad09c03977484 "pdflatex"
-  "USER_MANUAL.out" 1778082979 12245 6418c86403768a0a567a63acfc9f3402 "pdflatex"
-  "USER_MANUAL.tex" 1778082976 24554 799a984c89111e57edd1c90be8d6cbb3 ""
-  "USER_MANUAL.toc" 1778082979 6753 725f58bc594450248fb767ea9bbb3cd1 "pdflatex"
-  "c:/Users/WasStudent/Desktop/WaS stuff/repoShaggy/surveyWorkbench/USER_MANUAL.tex" 1778082976 24554 799a984c89111e57edd1c90be8d6cbb3 ""
+  "USER_MANUAL.aux" 1778085867 9969 e1056ac77e32e02330b798bf001867bc "pdflatex"
+  "USER_MANUAL.out" 1778085867 12052 52b50b6606a6202e78a0e29dd283f795 "pdflatex"
+  "USER_MANUAL.tex" 1778085865 24600 648f280f6bdd6521b9dacdae8b6fb69f ""
+  "USER_MANUAL.toc" 1778085867 6661 a7d88c6fd496dcbd3b676e462e6e4701 "pdflatex"
+  "c:/Users/WasStudent/Desktop/WaS stuff/repoShaggy/surveyWorkbench/USER_MANUAL.tex" 1778085865 24600 648f280f6bdd6521b9dacdae8b6fb69f ""
   (generated)
   "USER_MANUAL.aux"
   "USER_MANUAL.log"
