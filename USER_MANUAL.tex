@@ -140,6 +140,36 @@ Click \textbf{Generate Participant Folder}. The system will:
     \item Open the folder automatically
 \end{enumerate}
 
+\subsection{Batch Mode (Generation)}
+
+To generate folders for multiple participants at once:
+\begin{enumerate}
+    \item Tick \textbf{Batch Mode (multiple IDs)} next to the Participant ID field
+    \item The single-ID field is replaced by a text area; enter IDs one per line or comma-separated
+    \item Alternatively click \textbf{Import List\ldots} to load IDs from a \texttt{.txt} or \texttt{.csv} file
+    \item Configure questionnaires as usual and click \textbf{Generate Participant Folder}
+    \item A summary reports how many folders were created and lists any failures
+\end{enumerate}
+
+\subsection{Template Bundles}
+
+A template bundle saves the current questionnaire configuration (names, template paths, copy counts) so it can be reused without re-entering it manually.
+
+\subsubsection{Save a Bundle}
+\begin{enumerate}
+    \item Configure all questionnaire types as required
+    \item Click \textbf{Save Template Bundle} and enter a name when prompted
+    \item The bundle is stored as a JSON file in the \texttt{template\_bundles} folder next to the application
+    \item If a bundle with the same name already exists you will be asked whether to overwrite it
+\end{enumerate}
+
+\subsubsection{Load a Bundle}
+\begin{enumerate}
+    \item Click \textbf{Load Template Bundle}
+    \item Select a bundle name from the list
+    \item All questionnaire rows are populated automatically
+\end{enumerate}
+
 \subsection{File Naming Convention}
 
 \begin{itemize}
@@ -162,6 +192,67 @@ WaS3_001/
 ├── WaS3_001_nasa8.pdf
 └── WaS3_001_comments.pdf
 \end{verbatim}
+
+\section{Form Field Naming Convention}
+
+Survey Workbench recognises the type of each form field by its name. Every field in a questionnaire form must follow this structure:
+
+\begin{center}
+\texttt{(\_)NameX(\_N)}
+\end{center}
+
+Variables in parentheses are optional and depend on the field type.
+
+\subsection{Name}
+
+The first part of the field name indicates the \textbf{kind} of field:
+
+\begin{itemize}
+    \item \texttt{Text} -- The field is a free-text input field.
+    \item \texttt{Check} -- The field is a checkbox.
+\end{itemize}
+
+\subsection{X -- Field Group Number}
+
+\texttt{X} is a number that identifies the \textbf{question group} the field belongs to. Fields that belong to the same question share the same \texttt{X}. For example, the ``yes'' and ``no'' checkboxes of a binary question both receive the same group number.
+
+\subsection{N -- Checkbox Option Number (Check only)}
+
+\texttt{N} is only used for \texttt{Check} fields and identifies the specific checkbox within its group:
+
+\begin{itemize}
+    \item \textbf{Binary (yes/no):} Use \texttt{1} for \textit{yes} and \texttt{0} for \textit{no}.
+    \item \textbf{Multiple choice:} Number each option sequentially (1, 2, 3, \ldots), where each number is higher than the one before.
+\end{itemize}
+
+\subsection{\_ -- Not-Extracted Prefix}
+
+Prefixing a field name with an underscore (\texttt{\_}) marks the field as \textbf{excluded from extraction}. Survey Workbench will skip these fields entirely when processing the questionnaire data. The underscore is placed before the \texttt{Name} part of the field name.
+
+\subsection{How Field Types Are Extracted}
+
+The field name determines how Survey Workbench writes the data into the masterfile:
+
+\begin{itemize}
+    \item \textbf{Text field} (\texttt{TextX}): The content is written as-is into a single column.
+    \item \textbf{Checkbox group} (\texttt{CheckX\_N}): All options in the group share one output column. The value written is the \textbf{N} of whichever option is selected. If nothing is selected the value is empty. Examples: \texttt{Check2\_0} selected $\Rightarrow$ \texttt{0}; \texttt{Check1\_2} selected $\Rightarrow$ \texttt{2}; binary pair \texttt{Check3\_0}/\texttt{Check3\_1} with \texttt{Check3\_1} ticked $\Rightarrow$ \texttt{1}.
+    \item \textbf{Not-extracted field} (\texttt{\_NameX(\_N)}): The field is ignored and does not appear in the masterfile.
+\end{itemize}
+
+\subsection{Naming Examples}
+
+\begin{tabular}{ll}
+\textbf{Field Name} & \textbf{Meaning} \\
+\hline
+\texttt{Text1}      & Free-text field, group 1 \\
+\texttt{\_Text2}    & Free-text field, group 2 -- not extracted \\
+\texttt{Check3\_1}  & Checkbox, group 3, yes-option \\
+\texttt{Check3\_0}  & Checkbox, group 3, no-option \\
+\texttt{Check4\_1}  & Checkbox, group 4, option 1 (multiple choice) \\
+\texttt{Check4\_2}  & Checkbox, group 4, option 2 (multiple choice) \\
+\texttt{Check4\_3}  & Checkbox, group 4, option 3 (multiple choice) \\
+\texttt{\_Check5\_1} & Checkbox, group 5 -- not extracted \\
+\end{tabular}
 
 \section{Extract Data}
 
@@ -205,22 +296,22 @@ Click \textbf{Extract Data to Masterfile}. The system will automatically detect 
 
 \paragraph{For CSV files (.csv)}
 \begin{enumerate}
-    \item Find all \texttt{*\_Extract Data.csv} files in the participant folder
-    \item Read data from each CSV file
-    \item Append a new row to the CSV masterfile
-    \item Merge column headers if new fields appear
-    \item Save the updated file
+    \item Find all \texttt{*\_Extract Data.csv} files in the participant folder, sorted alphabetically
+    \item Group files by base survey name (trailing digits are stripped from the filename)
+    \item Flatten all groups and copies into a single ordered row: participant ID first, then each copy's fields sorted alphabetically
+    \item Write the header row only if the masterfile does not exist yet or is empty
+    \item Append the participant's values positionally as a new row
 \end{enumerate}
 
 \paragraph{For Excel files (.xls or .xlsx)}
 \begin{enumerate}
-    \item Find all \texttt{*\_Extract Data.csv} files in the participant folder
-    \item Read data from each CSV file
-    \item Open the Excel masterfile
-    \item Find the next empty row
-    \item Write participant ID and all extracted data
-    \item Create column headers if this is the first row
-    \item Save the file (XLS files stay as .xls, XLSX stay as .xlsx)
+    \item Find all \texttt{*\_Extract Data.csv} files in the participant folder, sorted alphabetically
+    \item Group files by base survey name: trailing digits are stripped, so \texttt{nasa1}, \texttt{nasa2} both belong to the \texttt{nasa} group
+    \item For each survey type, find or create a sheet in the workbook named after that type
+    \item Check row~1 of the sheet: if it is empty, write the column headers now
+    \item Find the next empty row starting from row~2 (row~1 is always the header row)
+    \item Flatten all copies into one row (participant ID first, then each copy's fields in alphabetical order) and write positionally by column index
+    \item Save as \texttt{.xlsx}; if the selected file was \texttt{.xls} it is converted and the path shown in the interface is updated
 \end{enumerate}
 
 \subsection{Choosing Masterfile Format}
@@ -239,32 +330,73 @@ Click \textbf{Extract Data to Masterfile}. The system will automatically detect 
     \item You want to work directly in Excel with formulas/pivot tables
     \item You need Excel-specific features (formatting, charts, multiple sheets)
     \item Your workflow is primarily in Microsoft Excel
-    \item You're using older Excel versions (use .xls for Excel 2003 and earlier)
-    \item You're using newer Excel versions (use .xlsx for Excel 2007+)
+    \item Note: regardless of whether you select a \texttt{.xls} or \texttt{.xlsx} file, the tool always saves as \texttt{.xlsx}; selecting a \texttt{.xls} file will convert it automatically and update the path shown in the interface
 \end{itemize}
 
 \textbf{All formats:}
 \begin{itemize}
-    \item Append new participants as rows to the masterfile
-    \item Automatically merge column headers when new fields appear
+    \item Append each participant as a new row to the masterfile
     \item Preserve all previous data in the masterfile
+    \item Column headers are written once on first use; subsequent participants are written by column position
     \item The tool auto-detects the format -- just select your file
 \end{itemize}
 
 \subsection{Data Organization}
 
 \begin{itemize}
-    \item Participant ID is written in the first column
-    \item Each CSV field gets a column named \texttt{\{SurveyType\}\_\{FieldName\}}
-    \item Example columns: \texttt{demographics\_Age}, \texttt{nasa1\_Mental\_Demand}, \texttt{nasa1\_Physical\_Demand}
-    \item Data is sorted alphabetically by column name
-    \item The ``File'' column from CSVs is automatically excluded
+    \item Participant ID is written in the first column of every data row
+    \item For Excel masterfiles each questionnaire type gets its own sheet, named after the base survey name (e.g.\ \texttt{nasa}, \texttt{demographics})
+    \item All copies of one type are flattened into a single row: participant ID, then first copy's fields, then second copy's fields, and so on
+    \item Fields within each copy are ordered alphabetically (\texttt{Check1}, \texttt{Check2}, \texttt{Text1}, \ldots)
+    \item Row~1 of each sheet is the header row; data rows start at row~2
+    \item For CSV masterfiles all questionnaire types and copies are flattened into one row per participant
+    \item The \texttt{File} column from source CSVs is automatically excluded
 \end{itemize}
 
-\subsubsection{Step 5: Verify Results}
+\subsubsection{Step 5: Preview and Verify}
 \begin{itemize}
-    \item A success message shows how many CSV files were processed
-    \item Check the Excel file to verify data was written correctly
+    \item Before writing, a \textbf{preview dialog} shows all field/value pairs that will be extracted; click \textbf{Confirm and Extract} to proceed or \textbf{Cancel} to abort
+    \item After successful extraction a confirmation message is shown
+    \item Check the masterfile to verify data was written correctly
+\end{itemize}
+
+\subsection{Duplicate Detection}
+
+Before extraction the tool checks whether the participant ID already exists in the masterfile:
+\begin{itemize}
+    \item \textbf{CSV:} the \texttt{participant\_id} column is scanned row by row
+    \item \textbf{Excel:} column~A (rows 2--1000) of the first sheet is scanned
+    \item In single-participant mode: if a duplicate is found you are asked whether to extract anyway
+    \item In batch mode: duplicates are skipped automatically and listed in the final summary
+\end{itemize}
+
+\subsection{Data Completeness Check}
+
+Before extraction the tool checks whether all expected \texttt{\_Extract Data.csv} files are present:
+\begin{itemize}
+    \item The expected count is taken from the number of questionnaire types configured in the Generation section
+    \item If the count does not match you are warned and asked whether to extract anyway
+    \item In batch mode: incomplete participants are skipped and listed in the summary
+\end{itemize}
+
+\subsection{Batch Mode (Extraction)}
+
+To extract data for multiple participants at once:
+\begin{enumerate}
+    \item Tick \textbf{Batch Mode (multiple IDs)} in the extraction section
+    \item Enter participant IDs in the text area, one per line or comma-separated; or click \textbf{Import List\ldots} to load from a \texttt{.txt} or \texttt{.csv} file
+    \item Click \textbf{Extract Data to Masterfile}
+    \item A summary reports successes, duplicates skipped, incomplete participants skipped, and failures
+    \item Note: the preview dialog is \textbf{not} shown in batch mode
+\end{enumerate}
+
+\subsection{Missing Data Report}
+
+Click \textbf{Missing Data Report} to scan the entire source folder without extracting any data:
+\begin{itemize}
+    \item Each participant subfolder is checked for the presence of \texttt{\_Extract Data.csv} files
+    \item A report dialog lists which participants are complete and which have missing files
+    \item Useful for quality control before running a batch extraction
 \end{itemize}
 
 \section{Configuration Management}
@@ -407,6 +539,16 @@ All saved settings will be restored to the interface.
 
 \section{Advanced Features}
 
+\subsection{What's This? Help Mode}
+
+Survey Workbench has a built-in context-sensitive help system:
+\begin{itemize}
+    \item Open \textbf{HELP $\rightarrow$ What's This? (Click for Help)} or press \textbf{Shift+F1}
+    \item The cursor changes to a question-mark pointer
+    \item Click any control to read a description of its purpose
+    \item The mode exits automatically after clicking a control or pressing \textbf{Esc}
+\end{itemize}
+
 \subsection{Multiple Questionnaire Copies}
 
 When you need repeated measures:
@@ -416,14 +558,15 @@ When you need repeated measures:
     \item Useful for: NASA-TLX repeated measures, multiple trials, time-series data
 \end{enumerate}
 
-\subsection{Custom Excel Sheets}
+\subsection{Per-Type Excel Sheets}
 
-The extraction looks for a sheet named ``Data'':
+Each questionnaire type automatically receives its own sheet in the workbook:
 \begin{itemize}
-    \item If found, data is written to this sheet
-    \item If not found, data is written to the first sheet
-    \item Headers are created automatically on the first row
-    \item Existing headers are preserved and matched
+    \item The sheet is named after the base survey name (e.g.\ \texttt{nasa}, \texttt{demographics})
+    \item If a sheet with that name does not exist it is created automatically
+    \item Row~1 is always the header row; it is written only once, the first time data is extracted to that sheet
+    \item After the first extraction the user may rename or reorder header cells freely -- values are always written by column position, not by matching header names
+    \item All copies of one survey type are written as one row on that sheet
 \end{itemize}
 
 \subsection{File Column Filtering}
