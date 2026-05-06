@@ -198,8 +198,10 @@ WaS3_001/
 Survey Workbench recognises the type of each form field by its name. Every field in a questionnaire form must follow this structure:
 
 \begin{center}
-\texttt{NameX(\_N)}
+\texttt{NameX(\_S)(\_n)}
 \end{center}
+
+Variables in parentheses are optional.
 
 Variables in parentheses are optional and depend on the field type.
 
@@ -216,14 +218,18 @@ The first part of the field name indicates the \textbf{kind} of field:
 
 \texttt{X} is a number that identifies the \textbf{question group} the field belongs to. Fields that belong to the same question share the same \texttt{X}. For example, the ``yes'' and ``no'' checkboxes of a binary question both receive the same group number.
 
-\subsection{N -- Checkbox Option Number (Check only)}
+\subsection{S -- Checkbox Option Suffix (Check only)}
 
-\texttt{N} is only used for \texttt{Check} fields and identifies the specific checkbox within its group:
+\texttt{S} is an alphanumeric label identifying the specific checkbox within its group. It can be a number (\texttt{1}, \texttt{2}, \ldots) or a short letter code (\texttt{m}, \texttt{w}, \texttt{L}, \texttt{R}, \ldots):
 
 \begin{itemize}
-    \item \textbf{Binary (yes/no):} Use \texttt{1} for \textit{yes} and \texttt{0} for \textit{no}.
-    \item \textbf{Multiple choice:} Number each option sequentially (1, 2, 3, \ldots), where each number is higher than the one before.
+    \item \textbf{Binary (yes/no):} Common convention is \texttt{0} for \textit{no} and \texttt{1} for \textit{yes}.
+    \item \textbf{Multiple choice:} Each option gets a unique suffix -- either sequential numbers (\texttt{1}, \texttt{2}, \texttt{3}) or descriptive letters (\texttt{m}, \texttt{w}, \texttt{d}).
 \end{itemize}
+
+\subsection{\_n -- Designer Annotation (optional)}
+
+A trailing \texttt{\_n} (or \texttt{\_N}) on any field name is silently stripped before parsing and has no effect on extraction. It is provided as a convenience for form designers who wish to annotate fields.
 
 \subsection{How Field Types Are Extracted}
 
@@ -231,8 +237,8 @@ The field name determines how Survey Workbench writes the data into the masterfi
 
 \begin{itemize}
     \item \textbf{Text field} (\texttt{TextX}): The content is written as-is into a single column.
-    \item \textbf{Checkbox group} (\texttt{CheckX\_N}): All options in the group share one output column. The value written is the \textbf{N} of whichever option is selected. If nothing is selected the value is empty. Examples: \texttt{Check2\_0} selected $\Rightarrow$ \texttt{0}; \texttt{Check1\_2} selected $\Rightarrow$ \texttt{2}; binary pair \texttt{Check3\_0}/\texttt{Check3\_1} with \texttt{Check3\_1} ticked $\Rightarrow$ \texttt{1}.
-    \item Any field name not matching \texttt{TextX} or \texttt{CheckX\_N} is silently skipped.
+    \item \textbf{Checkbox group} (\texttt{CheckX\_S}): All options in the group share one output column. The value written is the \textbf{suffix S} of whichever option is selected. If nothing is selected the value is empty. Examples: \texttt{Check1\_w} checked $\Rightarrow$ \texttt{w}; \texttt{Check2\_1} checked $\Rightarrow$ \texttt{1}; binary pair \texttt{Check3\_0}/\texttt{Check3\_1} with \texttt{Check3\_1} ticked $\Rightarrow$ \texttt{1}.
+    \item Any field name not matching \texttt{TextX} or \texttt{CheckX\_S} (after stripping \texttt{\_n}) is silently skipped.
 \end{itemize}
 
 \subsection{Naming Examples}
@@ -240,12 +246,15 @@ The field name determines how Survey Workbench writes the data into the masterfi
 \begin{tabular}{ll}
 \textbf{Field Name} & \textbf{Meaning} \\
 \hline
-\texttt{Text1}      & Free-text field, group 1 \\
-\texttt{Check3\_1}  & Checkbox, group 3, yes-option \\
-\texttt{Check3\_0}  & Checkbox, group 3, no-option \\
-\texttt{Check4\_1}  & Checkbox, group 4, option 1 (multiple choice) \\
-\texttt{Check4\_2}  & Checkbox, group 4, option 2 (multiple choice) \\
-\texttt{Check4\_3}  & Checkbox, group 4, option 3 (multiple choice) \\
+\texttt{Text1}        & Free-text field, group 1 \\
+\texttt{Text5\_n}     & Free-text field, group 5 (\texttt{\_n} annotation stripped) \\
+\texttt{Check1\_m}   & Checkbox, group 1, option ``m'' \\
+\texttt{Check1\_w}   & Checkbox, group 1, option ``w'' \\
+\texttt{Check3\_1}   & Checkbox, group 3, yes-option \\
+\texttt{Check3\_0}   & Checkbox, group 3, no-option \\
+\texttt{Check4\_1}   & Checkbox, group 4, option 1 (multiple choice) \\
+\texttt{Check4\_2}   & Checkbox, group 4, option 2 (multiple choice) \\
+\texttt{Check18\_1\_n} & Checkbox, group 18, option ``1'' (\texttt{\_n} stripped) \\
 \end{tabular}
 
 \section{Extract Data}

@@ -41,21 +41,26 @@ import xlwings as xlw  # type: ignore[import]
 # This is a known limitation of PyQt5's typing support
 
 
-def _parse_field_name(field_name: str) -> Optional[tuple[str, int, Optional[int]]]:
-    """Parse a form field name following the NameX(_N) convention.
+def _parse_field_name(field_name: str) -> Optional[tuple[str, int, Optional[str]]]:
+    """Parse a form field name following the NameX(_S)(_n) convention.
+
+    A trailing '_n' (or '_N') annotation is stripped before matching; it has no
+    effect on extraction.
 
     Returns (field_type, group, option) where:
       field_type : 'text' or 'check'
       group      : integer X
-      option     : integer N for Check fields, None for Text fields
+      option     : option suffix string S for Check fields, None for Text fields
     Returns None for fields not matching the convention.
     """
-    text_match = re.fullmatch(r'Text(\d+)', field_name)
+    # Strip trailing _n / _N annotation (used by form designers, ignored here)
+    name = re.sub(r'_[nN]$', '', field_name)
+    text_match = re.fullmatch(r'Text(\d+)', name)
     if text_match:
         return ('text', int(text_match.group(1)), None)
-    check_match = re.fullmatch(r'Check(\d+)_(\d+)', field_name)
+    check_match = re.fullmatch(r'Check(\d+)_([A-Za-z0-9]+)', name)
     if check_match:
-        return ('check', int(check_match.group(1)), int(check_match.group(2)))
+        return ('check', int(check_match.group(1)), check_match.group(2))
     return None
 
 
@@ -657,14 +662,15 @@ class MainWindow(QMainWindow):
     def _process_form_fields(self, raw_fields: Dict[str, str]) -> Dict[str, Any]:
         """Transform raw form field key-value pairs into output columns.
 
-        Rules (based on the NameX(_N) naming convention):
-          - Fields not matching the convention are skipped.
-          - TextX        -> one column 'TextX' with the raw string value.
-          - CheckX_N     -> one column 'CheckX': the N of whichever option is
-                           selected (e.g. Check1_2 checked -> 2, Check2_0 checked
-                           -> 0, Check2_1 checked -> 1).  None if nothing selected.
+        Rules:
+          - TextX or TextX_n  -> column 'TextX' with the raw string value.
+          - CheckX_S or CheckX_S_n -> column 'CheckX': the suffix S of whichever
+            option is selected (e.g. Check1_w checked -> 'w', Check2_1 checked
+            -> '1').  None if nothing selected.
+          - Trailing '_n'/'_N' on any field name is ignored.
+          - Field names not matching either pattern are skipped.
         """
-        check_groups: Dict[int, Dict[int, str]] = {}
+        check_groups: Dict[int, Dict[str, str]] = {}
         text_groups: Dict[int, str] = {}
 
         for field_name, value in raw_fields.items():
@@ -675,7 +681,7 @@ class MainWindow(QMainWindow):
             if field_type == 'text':
                 text_groups[group] = value
             else:
-                assert option is not None  # check fields always have an option index
+                assert option is not None  # check fields always have an option suffix
                 if group not in check_groups:
                     check_groups[group] = {}
                 check_groups[group][option] = value
@@ -686,9 +692,9 @@ class MainWindow(QMainWindow):
             result[f'Text{group}'] = value
 
         for group, options in check_groups.items():
-            # Always output N of the selected option (the number after the last _).
-            selected = next(
-                (n for n in sorted(options) if _is_checked(options[n])),
+            # Output the suffix string of whichever option is selected.
+            selected: Optional[str] = next(
+                (s for s in sorted(options) if _is_checked(options[s])),
                 None
             )
             result[f'Check{group}'] = selected
