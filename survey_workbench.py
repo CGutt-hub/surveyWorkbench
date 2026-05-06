@@ -22,6 +22,7 @@ Features:
 
 import sys
 import os
+import re
 import shutil
 import csv
 import json
@@ -38,6 +39,32 @@ import xlwings as xlw  # type: ignore[import]
 
 # PyQt5 has incomplete type stubs - some overloads contain Unknown types
 # This is a known limitation of PyQt5's typing support
+
+
+def _parse_field_name(field_name: str) -> Optional[tuple]:
+    """Parse a form field name following the (_)NameX(_N) convention.
+
+    Returns (field_type, group, option) where:
+      field_type : 'text' or 'check'
+      group      : integer X
+      option     : integer N for Check fields, None for Text fields
+    Returns None for fields that should be skipped (underscore-prefixed or
+    not matching the convention).
+    """
+    if field_name.startswith('_'):
+        return None
+    text_match = re.fullmatch(r'Text(\d+)', field_name)
+    if text_match:
+        return ('text', int(text_match.group(1)), None)
+    check_match = re.fullmatch(r'Check(\d+)_(\d+)', field_name)
+    if check_match:
+        return ('check', int(check_match.group(1)), int(check_match.group(2)))
+    return None
+
+
+def _is_checked(value: str) -> bool:
+    """Return True when a checkbox cell value represents the checked state."""
+    return str(value).strip().lower() not in ('', 'off', 'no', '0', 'false', 'none')
 
 class SaveConfigWindow(QDialog):
     signal = pyqtSignal(str)
@@ -619,9 +646,9 @@ class MainWindow(QMainWindow):
             all_data = self._prepare_data_for_extraction(participant_id)
             
             # Show preview
-            if not self.showPreviewDialog(all_data):
+            if not self.showPreviewDialog(all_data, participant_id):
                 return  # User cancelled
-            
+
             # Extract
             self._readout_single(participant_id, all_data)
             
@@ -630,73 +657,157 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self.error_window(f"Error extracting data: {str(e)}")
     
-    def _prepare_data_for_extraction(self, participant_id: str) -> Dict[str, Any]:
-        """Prepare data dictionary from participant folder"""
+    def _process_form_fields(self, raw_fields: Dict[str, str]) -> Dict[str, Any]:
+        """Transform raw form field key-value pairs into output columns.
+
+        Rules (based on the (_)NameX(_N) naming convention):
+          - Fields prefixed with '_' or not matching the convention are skipped.
+          - TextX  -> one column 'TextX' with the raw text value.
+          - CheckX with a _0 option (binary) -> one column 'CheckX': 1 (yes) or 0 (no).
+          - CheckX without a _0 option (multiple choice) -> one column 'CheckX':
+            the N number of the selected option, or None if nothing is selected.
+        """
+        check_groups: Dict[int, Dict[int, str]] = {}
+        text_groups: Dict[int, str] = {}
+
+        for field_name, value in raw_fields.items():
+            parsed = _parse_field_name(field_name)
+            if parsed is None:
+                continue
+            field_type, group, option = parsed
+            if field_type == 'text':
+                text_groups[group] = value
+            else:
+                if group not in check_groups:
+                    check_groups[group] = {}
+                check_groups[group][option] = value
+
+        result: Dict[str, Any] = {}
+
+        for group, value in text_groups.items():
+            result[f'Text{group}'] = value
+
+        for group, options in check_groups.items():
+            if 0 in options:  # binary: _0 = no, _1 = yes
+                result[f'Check{group}'] = 1 if _is_checked(options.get(1, '')) else 0
+            else:  # multiple choice: value = N of the selected option
+                selected = next(
+                    (n for n in sorted(options) if _is_checked(options[n])),
+                    None
+                )
+                result[f'Check{group}'] = selected
+
+        return result
+
+    def _prepare_data_for_extraction(self, participant_id: str) -> Dict[str, List[Dict[str, Any]]]:
+        """Prepare grouped data from participant folder.
+
+        Returns a dict mapping base survey name -> list of row dicts (one per copy,
+        in sorted file order). Each row dict contains the processed field values.
+        Trailing digits are stripped from the file's survey type to derive the base
+        name, so nasa1 and nasa2 both map to the 'nasa' group.
+        """
         if not participant_id:
             raise ValueError("Please enter a participant ID!")
         if not self.source_path:
             raise ValueError("Please select a source folder!")
         if not self.excel_path:
             raise ValueError("Please select a masterfile!")
-        
+
         participant_folder = os.path.join(self.source_path, participant_id)
         if not os.path.exists(participant_folder):
             raise ValueError(f"Participant folder not found: {participant_folder}")
-        
-        # Find all Extract Data CSV files
+
+        # Find all Extract Data CSV files, sorted so copies are in order (nasa1 before nasa2)
         csv_files = sorted([f for f in os.listdir(participant_folder) if f.endswith('_Extract Data.csv')])
         if not csv_files:
             raise ValueError("No Extract Data CSV files found in participant folder!")
-        
-        # Process CSV files and build data dictionary
-        all_data: Dict[str, Any] = {'participant_id': participant_id}
+
+        # Group rows by base survey name (strip trailing digits from survey type)
+        grouped: Dict[str, List[Dict[str, Any]]] = {}
         for csv_file in csv_files:
             survey_type = csv_file.replace(f'{participant_id}_', '').replace('_Extract Data.csv', '')
+            base_name = re.sub(r'\d+$', '', survey_type) or survey_type
             with open(os.path.join(participant_folder, csv_file), 'r', encoding='utf-8') as f:
                 for row in csv.DictReader(f):
-                    all_data.update({f"{survey_type}_{k}": v for k, v in row.items() if k != 'File'})
-        
-        return all_data
+                    raw = {k: v for k, v in row.items() if k != 'File'}
+                    processed = self._process_form_fields(raw)
+                    grouped.setdefault(base_name, []).append(processed)
+
+        return grouped
     
-    def _readout_single(self, participant_id: str, all_data: Optional[Dict[str, Any]] = None) -> None:
+    def _readout_single(self, participant_id: str, all_data: Optional[Dict[str, List[Dict[str, Any]]]] = None) -> None:
         """Extract data for single participant to Excel (no preview)"""
         if all_data is None:
             all_data = self._prepare_data_for_extraction(participant_id)
-        
-        # Open Excel workbook
+
         wb: xlw.Book = xlw.Book(self.excel_path)
-        
+        wb_closed = False
         try:
-            # Attempt to find a sheet named 'Data' or use the first sheet
             sheet_names: List[str] = [cast(str, s.name) for s in wb.sheets]  # type: ignore[misc]
-            sheet: xlw.Sheet = cast(xlw.Sheet, wb.sheets['Data' if 'Data' in sheet_names else 0])
-            
-            # Find next empty row
-            next_row = 1
-            while sheet.range(f'A{next_row}').value is not None:  # type: ignore[misc]
-                next_row += 1
-            
-            # Write data (headers on first row, values on next_row)
-            sorted_data = sorted((k, v) for k, v in all_data.items() if k != 'participant_id')
-            sheet.range(f'A{next_row}').value = participant_id  # type: ignore[misc]
-            for col, (key, value) in enumerate(sorted_data, start=2):
-                if next_row == 1:
-                    sheet.range(1, col).value = key  # type: ignore[misc]
-                sheet.range(next_row, col).value = value  # type: ignore[misc]
-            
-            # Save as XLS format
-            if not self.excel_path.lower().endswith('.xls'):
-                xls_path = self.excel_path.rsplit('.', 1)[0] + '.xls'
-                cast(xlw.Book, wb).save(xls_path)  # type: ignore[misc]
+
+            for base_name, rows in all_data.items():
+                # Resolve target sheet: prefer a sheet named after the survey type,
+                # fall back to 'Data', then the first sheet.
+                if base_name in sheet_names:
+                    sheet: xlw.Sheet = cast(xlw.Sheet, wb.sheets[base_name])
+                elif 'Data' in sheet_names:
+                    sheet = cast(xlw.Sheet, wb.sheets['Data'])
+                else:
+                    sheet = cast(xlw.Sheet, wb.sheets[0])
+
+                # Read existing column headers from row 1
+                existing_headers: List[str] = []
+                col_idx = 1
+                while sheet.range(1, col_idx).value is not None:  # type: ignore[misc]
+                    existing_headers.append(str(sheet.range(1, col_idx).value))  # type: ignore[misc]
+                    col_idx += 1
+
+                # Find next empty data row (data rows start at row 2)
+                next_row = 2
+                while sheet.range(next_row, 1).value is not None:  # type: ignore[misc]
+                    next_row += 1
+
+                for row_data in rows:
+                    sorted_items = sorted(row_data.items())
+                    all_fields = ['participant_id'] + [k for k, _ in sorted_items]
+                    all_values = [participant_id] + [v for _, v in sorted_items]
+
+                    # Write headers on first use of this sheet
+                    if not existing_headers:
+                        for i, header in enumerate(all_fields, start=1):
+                            sheet.range(1, i).value = header  # type: ignore[misc]
+                        existing_headers = list(all_fields)
+
+                    # Write values into matching columns (append new columns as needed)
+                    for field, value in zip(all_fields, all_values):
+                        if field in existing_headers:
+                            c = existing_headers.index(field) + 1
+                        else:
+                            existing_headers.append(field)
+                            c = len(existing_headers)
+                            sheet.range(1, c).value = field  # type: ignore[misc]
+                        sheet.range(next_row, c).value = value  # type: ignore[misc]
+
+                    next_row += 1
+
+            # Save as xlsx (new format); convert .xls to .xlsx if needed
+            if not self.excel_path.lower().endswith('.xlsx'):
+                xlsx_path = self.excel_path.rsplit('.', 1)[0] + '.xlsx'
+                cast(xlw.Book, wb).save(xlsx_path)  # type: ignore[misc]
                 wb.close()  # type: ignore[misc]
-                self.excel_path = xls_path
-                self.excel_pathset.setText(xls_path)
+                wb_closed = True
+                self.excel_path = xlsx_path
+                self.excel_pathset.setText(xlsx_path)
             else:
                 cast(xlw.Book, wb).save()  # type: ignore[misc]
-                
+
         finally:
-            if 'wb' in locals():
-                wb.close()  # type: ignore[misc]
+            if not wb_closed:
+                try:
+                    wb.close()  # type: ignore[misc]
+                except Exception:
+                    pass
     
     def readout_csv(self) -> None:
         """Extract data from participant folder to CSV with preview"""
@@ -705,9 +816,9 @@ class MainWindow(QMainWindow):
             all_data = self._prepare_data_for_extraction(participant_id)
             
             # Show preview
-            if not self.showPreviewDialog(all_data):
+            if not self.showPreviewDialog(all_data, participant_id):
                 return  # User cancelled
-            
+
             # Extract
             self._readout_csv_single(participant_id, all_data)
             
@@ -716,13 +827,13 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self.error_window(f"Error extracting data: {str(e)}")
     
-    def _readout_csv_single(self, participant_id: str, all_data: Optional[Dict[str, Any]] = None) -> None:
+    def _readout_csv_single(self, participant_id: str, all_data: Optional[Dict[str, List[Dict[str, Any]]]] = None) -> None:
         """Extract data for single participant to CSV (no preview)"""
         if all_data is None:
             all_data = self._prepare_data_for_extraction(participant_id)
-        
-        csv_path = self.excel_path  # Use the pre-selected masterfile path
-        
+
+        csv_path = self.excel_path
+
         # Read existing CSV to get all fieldnames
         existing_fieldnames: List[str] = []
         file_exists = os.path.exists(csv_path) and os.path.getsize(csv_path) > 0
@@ -730,16 +841,29 @@ class MainWindow(QMainWindow):
             with open(csv_path, 'r', newline='', encoding='utf-8') as f:
                 reader = csv.DictReader(f)
                 existing_fieldnames = list(reader.fieldnames) if reader.fieldnames else []
-        
-        # Merge fieldnames
-        all_fieldnames = list(dict.fromkeys(existing_fieldnames + list(all_data.keys())))
-        
+
+        # Build one CSV row per (survey_type, copy), preserving extraction order
+        new_rows: List[Dict[str, Any]] = []
+        for base_name, rows in all_data.items():
+            for i, row_data in enumerate(rows, start=1):
+                row: Dict[str, Any] = {
+                    'participant_id': participant_id,
+                    'survey_type': f"{base_name}{i if len(rows) > 1 else ''}",
+                }
+                row.update(row_data)
+                new_rows.append(row)
+
+        # Merge fieldnames (preserve order, add new fields at end)
+        all_new_fields = list(dict.fromkeys(k for r in new_rows for k in r.keys()))
+        all_fieldnames = list(dict.fromkeys(existing_fieldnames + all_new_fields))
+
         # Append to CSV
         with open(csv_path, 'a', newline='', encoding='utf-8') as f:
             writer = csv.DictWriter(f, fieldnames=all_fieldnames)
             if not file_exists:
                 writer.writeheader()
-            writer.writerow(all_data)
+            for row in new_rows:
+                writer.writerow(row)
     
     
     def updateRecentConfigsMenu(self) -> None:
@@ -1105,26 +1229,34 @@ class MainWindow(QMainWindow):
         
         return len(issues) == 0, issues if issues else csv_files
     
-    def showPreviewDialog(self, data: Dict[str, Any]) -> bool:
+    def showPreviewDialog(self, data: Dict[str, List[Dict[str, Any]]], participant_id: str = '') -> bool:
         """Show preview dialog with data to be extracted. Returns True if user confirms."""
         dialog = QDialog(self)
         dialog.setWindowTitle("Preview Data Extraction")
         dialog.setModal(True)
         dialog.resize(800, 600)
-        
+
         layout = QVBoxLayout()
-        
-        label = QLabel(f"Preview data for participant: {data.get('participant_id', 'Unknown')}")
+
+        label = QLabel(f"Preview data for participant: {participant_id or 'Unknown'}")
         label.setStyleSheet("font-weight: bold; font-size: 14px;")
         layout.addWidget(label)
-        
+
+        # Flatten grouped data for tabular display
+        display_rows: List[tuple] = []
+        for base_name, rows in data.items():
+            for i, row_data in enumerate(rows, start=1):
+                suffix = str(i) if len(rows) > 1 else ''
+                for key, value in sorted(row_data.items()):
+                    display_rows.append((f"{base_name}{suffix}_{key}", value))
+
         # Create table
         table = QTableWidget()
         table.setColumnCount(2)
         table.setHorizontalHeaderLabels(["Field", "Value"])
-        table.setRowCount(len(data))
-        
-        for i, (key, value) in enumerate(data.items()):
+        table.setRowCount(len(display_rows))
+
+        for i, (key, value) in enumerate(display_rows):
             table.setItem(i, 0, QTableWidgetItem(str(key)))
             table.setItem(i, 1, QTableWidgetItem(str(value)))
         
