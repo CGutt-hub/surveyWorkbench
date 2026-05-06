@@ -747,14 +747,12 @@ class MainWindow(QMainWindow):
             sheet_names: List[str] = [cast(str, s.name) for s in wb.sheets]  # type: ignore[misc]
 
             for base_name, rows in all_data.items():
-                # Resolve target sheet: prefer a sheet named after the survey type,
-                # fall back to 'Data', then the first sheet.
+                # Each questionnaire type gets its own sheet; create it if absent.
                 if base_name in sheet_names:
                     sheet: xlw.Sheet = cast(xlw.Sheet, wb.sheets[base_name])
-                elif 'Data' in sheet_names:
-                    sheet = cast(xlw.Sheet, wb.sheets['Data'])
                 else:
-                    sheet = cast(xlw.Sheet, wb.sheets[0])
+                    sheet = cast(xlw.Sheet, wb.sheets.add(base_name))  # type: ignore[misc]
+                    sheet_names.append(base_name)
 
                 # Read existing column headers from row 1
                 existing_headers: List[str] = []
