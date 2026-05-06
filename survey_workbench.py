@@ -760,11 +760,16 @@ class MainWindow(QMainWindow):
                     existing_headers.append(str(sheet.range(1, col_idx).value))  # type: ignore[misc]
                     col_idx += 1
 
-                # Find next empty data row; row 1 is always the header row,
-                # so data starts at row 2 and never goes to row 1.
-                next_row = 2
-                while sheet.range(next_row, 1).value is not None:  # type: ignore[misc]
-                    next_row += 1
+                # Determine the target row from the numeric suffix of the participant ID.
+                # e.g. WaS1_001 -> 1 -> row 2, WaS1_023 -> 23 -> row 24.
+                # Fall back to scanning for the next empty row if no digits found.
+                num_match = re.search(r'(\d+)$', participant_id)
+                if num_match:
+                    next_row = int(num_match.group(1)) + 1
+                else:
+                    next_row = 2
+                    while sheet.range(next_row, 1).value is not None:  # type: ignore[misc]
+                        next_row += 1
 
                 # Build flat ordered fields and values (no copy-number prefix).
                 # All copies of this type are appended in sequence.
