@@ -766,28 +766,31 @@ class MainWindow(QMainWindow):
                 while sheet.range(next_row, 1).value is not None:  # type: ignore[misc]
                     next_row += 1
 
-                for row_data in rows:
-                    sorted_items = sorted(row_data.items())
-                    all_fields = ['participant_id'] + [k for k, _ in sorted_items]
-                    all_values = [participant_id] + [v for _, v in sorted_items]
+                # All copies of this type go into ONE row.
+                # Columns: participant_id | 1_Field | 2_Field | ...
+                flat_fields: List[str] = ['participant_id']
+                flat_values: List[Any] = [participant_id]
+                for copy_num, row_data in enumerate(rows, start=1):
+                    prefix = f"{copy_num}_" if len(rows) > 1 else ""
+                    for k, v in sorted(row_data.items()):
+                        flat_fields.append(f"{prefix}{k}")
+                        flat_values.append(v)
 
-                    # Write headers on first use of this sheet
-                    if not existing_headers:
-                        for i, header in enumerate(all_fields, start=1):
-                            sheet.range(1, i).value = header  # type: ignore[misc]
-                        existing_headers = list(all_fields)
+                # Write headers on first use of this sheet
+                if not existing_headers:
+                    for i, header in enumerate(flat_fields, start=1):
+                        sheet.range(1, i).value = header  # type: ignore[misc]
+                    existing_headers = list(flat_fields)
 
-                    # Write values into matching columns (append new columns as needed)
-                    for field, value in zip(all_fields, all_values):
-                        if field in existing_headers:
-                            c = existing_headers.index(field) + 1
-                        else:
-                            existing_headers.append(field)
-                            c = len(existing_headers)
-                            sheet.range(1, c).value = field  # type: ignore[misc]
-                        sheet.range(next_row, c).value = value  # type: ignore[misc]
-
-                    next_row += 1
+                # Write values into matching columns (append new columns as needed)
+                for field, value in zip(flat_fields, flat_values):
+                    if field in existing_headers:
+                        c = existing_headers.index(field) + 1
+                    else:
+                        existing_headers.append(field)
+                        c = len(existing_headers)
+                        sheet.range(1, c).value = field  # type: ignore[misc]
+                    sheet.range(next_row, c).value = value  # type: ignore[misc]
 
             # Save as xlsx (new format); convert .xls to .xlsx if needed
             if not self.excel_path.lower().endswith('.xlsx'):
@@ -840,19 +843,16 @@ class MainWindow(QMainWindow):
                 reader = csv.DictReader(f)
                 existing_fieldnames = list(reader.fieldnames) if reader.fieldnames else []
 
-        # Build one CSV row per (survey_type, copy), preserving extraction order
-        new_rows: List[Dict[str, Any]] = []
+        # Build one CSV row per participant (all copies flattened into columns)
+        new_row: Dict[str, Any] = {'participant_id': participant_id}
         for base_name, rows in all_data.items():
-            for i, row_data in enumerate(rows, start=1):
-                row: Dict[str, Any] = {
-                    'participant_id': participant_id,
-                    'survey_type': f"{base_name}{i if len(rows) > 1 else ''}",
-                }
-                row.update(row_data)
-                new_rows.append(row)
+            for copy_num, row_data in enumerate(rows, start=1):
+                prefix = f"{copy_num}_" if len(rows) > 1 else ""
+                for k, v in sorted(row_data.items()):
+                    new_row[f"{base_name}_{prefix}{k}"] = v
 
         # Merge fieldnames (preserve order, add new fields at end)
-        all_new_fields = list(dict.fromkeys(k for r in new_rows for k in r.keys()))
+        all_new_fields = list(new_row.keys())
         all_fieldnames = list(dict.fromkeys(existing_fieldnames + all_new_fields))
 
         # Append to CSV
@@ -860,8 +860,7 @@ class MainWindow(QMainWindow):
             writer = csv.DictWriter(f, fieldnames=all_fieldnames)
             if not file_exists:
                 writer.writeheader()
-            for row in new_rows:
-                writer.writerow(row)
+            writer.writerow(new_row)
     
     
     def updateRecentConfigsMenu(self) -> None:
