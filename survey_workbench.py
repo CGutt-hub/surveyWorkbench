@@ -41,7 +41,7 @@ import xlwings as xlw  # type: ignore[import]
 # This is a known limitation of PyQt5's typing support
 
 
-def _parse_field_name(field_name: str) -> Optional[tuple]:
+def _parse_field_name(field_name: str) -> Optional[tuple[str, int, Optional[int]]]:
     """Parse a form field name following the (_)NameX(_N) convention.
 
     Returns (field_type, group, option) where:
@@ -678,6 +678,7 @@ class MainWindow(QMainWindow):
             if field_type == 'text':
                 text_groups[group] = value
             else:
+                assert option is not None  # check fields always have an option index
                 if group not in check_groups:
                     check_groups[group] = {}
                 check_groups[group][option] = value
@@ -765,31 +766,23 @@ class MainWindow(QMainWindow):
                 while sheet.range(next_row, 1).value is not None:  # type: ignore[misc]
                     next_row += 1
 
-                # All copies of this type go into ONE row.
-                # Columns: participant_id | 1_Field | 2_Field | ...
+                # Build flat ordered fields and values (no copy-number prefix).
+                # All copies of this type are appended in sequence.
                 flat_fields: List[str] = ['participant_id']
                 flat_values: List[Any] = [participant_id]
-                for copy_num, row_data in enumerate(rows, start=1):
-                    prefix = f"{copy_num}_" if len(rows) > 1 else ""
+                for row_data in rows:
                     for k, v in sorted(row_data.items()):
-                        flat_fields.append(f"{prefix}{k}")
+                        flat_fields.append(k)
                         flat_values.append(v)
 
-                # Write headers on first use of this sheet
+                # Write headers to row 1 only on the very first use of this sheet.
                 if not existing_headers:
                     for i, header in enumerate(flat_fields, start=1):
                         sheet.range(1, i).value = header  # type: ignore[misc]
-                    existing_headers = list(flat_fields)
 
-                # Write values into matching columns (append new columns as needed)
-                for field, value in zip(flat_fields, flat_values):
-                    if field in existing_headers:
-                        c = existing_headers.index(field) + 1
-                    else:
-                        existing_headers.append(field)
-                        c = len(existing_headers)
-                        sheet.range(1, c).value = field  # type: ignore[misc]
-                    sheet.range(next_row, c).value = value  # type: ignore[misc]
+                # Write values positionally — always, regardless of header state.
+                for i, value in enumerate(flat_values, start=1):
+                    sheet.range(next_row, i).value = value  # type: ignore[misc]
 
             # Save as xlsx (new format); convert .xls to .xlsx if needed
             if not self.excel_path.lower().endswith('.xlsx'):
@@ -834,32 +827,23 @@ class MainWindow(QMainWindow):
 
         csv_path = self.excel_path
 
-        # Read existing CSV to get all fieldnames
-        existing_fieldnames: List[str] = []
         file_exists = os.path.exists(csv_path) and os.path.getsize(csv_path) > 0
-        if file_exists:
-            with open(csv_path, 'r', newline='', encoding='utf-8') as f:
-                reader = csv.DictReader(f)
-                existing_fieldnames = list(reader.fieldnames) if reader.fieldnames else []
 
-        # Build one CSV row per participant (all copies flattened into columns)
-        new_row: Dict[str, Any] = {'participant_id': participant_id}
-        for base_name, rows in all_data.items():
-            for copy_num, row_data in enumerate(rows, start=1):
-                prefix = f"{copy_num}_" if len(rows) > 1 else ""
+        # Build flat ordered fields and values (no copy-number prefix).
+        flat_fields: List[str] = ['participant_id']
+        flat_values: List[Any] = [participant_id]
+        for rows in all_data.values():
+            for row_data in rows:
                 for k, v in sorted(row_data.items()):
-                    new_row[f"{base_name}_{prefix}{k}"] = v
+                    flat_fields.append(k)
+                    flat_values.append(v)
 
-        # Merge fieldnames (preserve order, add new fields at end)
-        all_new_fields = list(new_row.keys())
-        all_fieldnames = list(dict.fromkeys(existing_fieldnames + all_new_fields))
-
-        # Append to CSV
+        # Append to CSV positionally; write header row only on first use.
         with open(csv_path, 'a', newline='', encoding='utf-8') as f:
-            writer = csv.DictWriter(f, fieldnames=all_fieldnames)
+            writer = csv.writer(f)
             if not file_exists:
-                writer.writeheader()
-            writer.writerow(new_row)
+                writer.writerow(flat_fields)
+            writer.writerow(flat_values)
     
     
     def updateRecentConfigsMenu(self) -> None:
@@ -1239,7 +1223,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(label)
 
         # Flatten grouped data for tabular display
-        display_rows: List[tuple] = []
+        display_rows: List[tuple[str, Any]] = []
         for base_name, rows in data.items():
             for i, row_data in enumerate(rows, start=1):
                 suffix = str(i) if len(rows) > 1 else ''

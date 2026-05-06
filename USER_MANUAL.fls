@@ -1,6 +1,6 @@
-PWD c:\Users\WasStudent\ownCloud - wasStudents@ocfromthefuture.ifado.de\wasStudentsCloud\WaS_survey\survey_workbench\survey_workbench - v2.0
+PWD c:\Users\WasStudent\Desktop\WaS stuff\repoShaggy\surveyWorkbench
 INPUT C:\Users\WasStudent\AppData\Local\MiKTeX\miktex\data\le\pdftex\pdflatex.fmt
-INPUT c:\Users\WasStudent\ownCloud - wasStudents@ocfromthefuture.ifado.de\wasStudentsCloud\WaS_survey\survey_workbench\survey_workbench - v2.0\USER_MANUAL.tex
+INPUT c:\Users\WasStudent\Desktop\WaS stuff\repoShaggy\surveyWorkbench\USER_MANUAL.tex
 OUTPUT USER_MANUAL.log
 INPUT C:\Users\WasStudent\AppData\Local\Programs\MiKTeX\tex\latex\base\article.cls
 INPUT C:\Users\WasStudent\AppData\Local\Programs\MiKTeX\tex\latex\base\article.cls
