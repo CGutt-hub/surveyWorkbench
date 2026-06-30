@@ -1253,6 +1253,28 @@ class MainWindow(QMainWindow):
                 f"Field mapping imported from '{source_name}' (in memory only — no active configuration to save to)."
             )
 
+    def _generate_field_mapping_from_forms(self) -> Dict[str, str]:
+        """Generate field mapping by scanning configured form templates.
+        Returns a mapping of field_name -> field_name for all fields found in templates.
+        """
+        fields: set[str] = set()
+        
+        for row in self.questionnaire_rows:
+            template = row.template_path.strip()
+            if not template or not template.lower().endswith('.pdf'):
+                continue
+            
+            try:
+                template_fields = self._extract_pdf_form_fields(template)
+                if template_fields:
+                    fields.update(template_fields.keys())
+            except Exception:
+                # Silently skip templates that fail to read
+                continue
+        
+        # Generate mapping: field -> field (identity mapping)
+        return {field: field for field in sorted(fields)}
+
     def showFieldMappingDialog(self, mapping: Dict[str, str]) -> tuple[bool, Dict[str, str]]:
         """Open editable mapping list with columns Field | Name."""
         dialog: QDialog = QDialog(self)
