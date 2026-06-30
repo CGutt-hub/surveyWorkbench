@@ -1395,7 +1395,7 @@ class MainWindow(QMainWindow):
         # Build flattened dictionary for masterfile export.
         all_data: Dict[str, Any] = {'participant_id': participant_id}
         
-        for survey_type, row in survey_rows.items():
+        for _, row in survey_rows.items():
             checkbox_groups: Dict[str, Dict[str, str]] = {}
             for k, v in row.items():
                 if k.startswith('Check') and '_' in k:
