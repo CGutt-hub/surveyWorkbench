@@ -60,7 +60,7 @@ python survey_workbench_v2.1.py
 ### 1. Generate Participant Folders
 
 1. **Configure Questionnaires**
-   - Enter participant ID (e.g., `WaS3_001`)
+   - Enter participant ID (e.g., `P_001`)
    - Select target folder for participant directories
    - Add questionnaire types (name, PDF template, copy count)
 
@@ -126,10 +126,10 @@ Checkboxes in PDFs use naming convention:
 
 ### Example Data Row
 
-| participant_id | Age | Gender | Mental_Demand | NASA1_Score |
+| participant_id | Age | Gender | Mental_Demand | Score |
 |---|---|---|---|---|
-| WaS3_001 | 28 | 1 | 7.5 | 68 |
-| WaS3_002 | 35 | 2 | 5.2 | 72 |
+| P_001 | 28 | 1 | 7.5 | 68 |
+| P_002 | 35 | 2 | 5.2 | 72 |
 
 ## Configuration Files
 
@@ -157,16 +157,16 @@ Each configuration saves:
 ## Workflow Example
 
 ```
-1. Create configuration "WaS_Study_2026"
-   ├─ Add questionnaires: demographics.pdf, nasa-tlx.pdf
-   ├─ Set target folder: C:\Studies\WaS\Participants
+1. Create configuration "MyStudy_2026"
+   ├─ Add questionnaires: demographics.pdf, survey-tlx.pdf
+   ├─ Set target folder: C:\Studies\MyStudy\Participants
    └─ Save configuration
 
 2. Generate participant folders
-   ├─ ID: WaS3_001
-   ├─ Creates: WaS3_001/
-   │   ├─ WaS3_001_demographics.pdf
-   │   └─ WaS3_001_nasa-tlx.pdf
+   ├─ ID: P_001
+   ├─ Creates: P_001/
+   │   ├─ P_001_demographics.pdf
+   │   └─ P_001_survey-tlx.pdf
    └─ Prefill optional values
 
 3. Participant completes questionnaires
@@ -178,8 +178,8 @@ Each configuration saves:
    └─ Save to configuration
 
 5. Extract data
-   ├─ Source: C:\Studies\WaS\Completed\WaS3_001/
-   ├─ Masterfile: C:\Studies\WaS\masterfile.xlsx
+   ├─ Source: C:\Studies\MyStudy\Completed\P_001/
+   ├─ Masterfile: C:\Studies\MyStudy\masterfile.xlsx
    └─ Appends row with mapped column names
 ```
 
@@ -260,8 +260,8 @@ For issues, feature requests, or questions:
 
 ## License
 
-Internal Use Only — WaS Survey Research Project
+MIT License — See LICENSE file for details
 
 ---
 
-**Survey Workbench v2.1** | June 2026 | Direct PDF Form Extraction Workflow
+**Survey Workbench v2.1** | June 2026 | Open-Source PDF Form Extraction Tool
