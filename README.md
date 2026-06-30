@@ -260,7 +260,11 @@ For issues, feature requests, or questions:
 
 ## License
 
-MIT License — See LICENSE file for details
+This project is licensed under the **MIT License** — See [LICENSE](LICENSE) file for details.
+
+**Copyright © 2026 Cagatay Özcan Jagiello Gutt (Original Creator and Developer)**
+
+The MIT License permits free use, modification, and distribution while preserving this copyright attribution. Your creative work and engineering effort are permanently credited as the original creator of this tool.
 
 ---
 
