@@ -169,8 +169,6 @@ class MainWindow(QMainWindow):
         self.questionnaire_rows: List[QuestionnaireRow] = []
         self.recent_configs_menu: Optional[QMenu] = None
         self.delete_configs_menu: Optional[QMenu] = None
-        self.load_field_mapping_menu: Optional[QMenu] = None
-        self.delete_field_mapping_menu: Optional[QMenu] = None
         
         # Main widget and layout
         main_widget = QWidget()
@@ -203,17 +201,9 @@ class MainWindow(QMainWindow):
         self.delete_configs_menu = file_menu.addMenu("&Delete Configuration")
         assert self.delete_configs_menu is not None
         
-        # Load Field Mapping submenu
-        self.load_field_mapping_menu = file_menu.addMenu("&Load Field Mapping")
-        assert self.load_field_mapping_menu is not None
-        
-        # Delete Field Mapping submenu
-        self.delete_field_mapping_menu = file_menu.addMenu("&Delete Field Mapping")
-        assert self.delete_field_mapping_menu is not None
-        
         file_menu.aboutToShow.connect(self.updateRecentConfigsMenu)  # type: ignore[misc]
 
-        edit_mapping_action: QAction = QAction("&Save/Edit Field Maopping", self)
+        edit_mapping_action: QAction = QAction("&Save/Edit Field Mapping", self)
         edit_mapping_action.triggered.connect(self.editFieldMappingFromExtraction)
         edit_mapping_action.setToolTip("Save or edit the field name mapping for the active configuration")
         edit_mapping_action.setToolTip("Edit the field name mapping for the active configuration")
@@ -1215,44 +1205,6 @@ class MainWindow(QMainWindow):
         print(f"DEBUG: Using in-memory field mapping: {self.field_mapping}")  # Debug logging
         return self.field_mapping
 
-    def loadFieldMappingFromConfig(self, source_name: Optional[str] = None) -> None:
-        """Let the user pick any saved configuration and import its field mapping."""
-        config = ConfigParser()
-        config.read('config.ini')
-        sections = config.sections()
-        if not sections:
-            self.error_window("No configurations available to load a mapping from.")
-            return
-
-        if source_name is None:
-            source_name, ok = QInputDialog.getItem(
-                self, "Load Field Mapping",
-                "Select a configuration to import its field mapping:",
-                sections, 0, False
-            )
-            if not ok:
-                return
-
-        imported = self._load_mapping_from_config(source_name)
-        if not imported:
-            self.error_window(f"Configuration '{source_name}' has no saved field mapping.")
-            return
-
-        self.field_mapping = imported
-
-        # Persist into the active config if one is loaded
-        if self.active_config_name:
-            self._save_mapping_to_config(self.active_config_name, imported)
-            QMessageBox.information(
-                self, "Success",
-                f"Field mapping imported from '{source_name}' and saved to '{self.active_config_name}'."
-            )
-        else:
-            QMessageBox.information(
-                self, "Success",
-                f"Field mapping imported from '{source_name}' (in memory only — no active configuration to save to)."
-            )
-
     def _generate_field_mapping_from_forms(self) -> Dict[str, str]:
         """Generate field mapping by scanning configured form templates.
         Returns a mapping of field_name -> field_name for all fields found in templates.
@@ -1512,11 +1464,6 @@ class MainWindow(QMainWindow):
             self.recent_configs_menu.clear()
         if self.delete_configs_menu is not None:
             self.delete_configs_menu.clear()
-        if self.load_field_mapping_menu is not None:
-            self.load_field_mapping_menu.clear()
-        if self.delete_field_mapping_menu is not None:
-            self.delete_field_mapping_menu.clear()
-        
         config = ConfigParser()
         config.read('config.ini')
         sections = config.sections()
@@ -1531,16 +1478,6 @@ class MainWindow(QMainWindow):
                 no_delete_action = QAction("(No configurations available)", self)
                 no_delete_action.setEnabled(False)
                 self.delete_configs_menu.addAction(no_delete_action)  # type: ignore[misc]
-            
-            if self.load_field_mapping_menu is not None:
-                no_load_mapping_action = QAction("(No field mappings available)", self)
-                no_load_mapping_action.setEnabled(False)
-                self.load_field_mapping_menu.addAction(no_load_mapping_action)  # type: ignore[misc]
-            
-            if self.delete_field_mapping_menu is not None:
-                no_delete_mapping_action = QAction("(No field mappings available)", self)
-                no_delete_mapping_action.setEnabled(False)
-                self.delete_field_mapping_menu.addAction(no_delete_mapping_action)  # type: ignore[misc]
         else:
             for section in sections:
                 # Recent configurations - load on click
@@ -1554,29 +1491,6 @@ class MainWindow(QMainWindow):
                     delete_action = QAction(section, self)
                     delete_action.triggered.connect(lambda checked, name=section: self.confirmDeleteConfig(name))  # type: ignore[misc]
                     self.delete_configs_menu.addAction(delete_action)  # type: ignore[misc]
-                
-                # Load field mapping - load on click
-                if config.has_option(section, 'field_mapping_json'):
-                    if self.load_field_mapping_menu is not None:
-                        load_mapping_action = QAction(section, self)
-                        load_mapping_action.triggered.connect(lambda checked, name=section: self.loadFieldMappingFromConfig(name))  # type: ignore[misc]
-                        self.load_field_mapping_menu.addAction(load_mapping_action)  # type: ignore[misc]
-                    
-                    # Delete field mapping - delete on click with confirmation
-                    if self.delete_field_mapping_menu is not None:
-                        delete_mapping_action = QAction(section, self)
-                        delete_mapping_action.triggered.connect(lambda checked, name=section: self.confirmDeleteFieldMapping(name))  # type: ignore[misc]
-                        self.delete_field_mapping_menu.addAction(delete_mapping_action)  # type: ignore[misc]
-            
-            if self.load_field_mapping_menu is not None and self.load_field_mapping_menu.actions() == []:
-                no_load_mapping_action = QAction("(No field mappings available)", self)
-                no_load_mapping_action.setEnabled(False)
-                self.load_field_mapping_menu.addAction(no_load_mapping_action)  # type: ignore[misc]
-            
-            if self.delete_field_mapping_menu is not None and self.delete_field_mapping_menu.actions() == []:
-                no_delete_mapping_action = QAction("(No field mappings available)", self)
-                no_delete_mapping_action.setEnabled(False)
-                self.delete_field_mapping_menu.addAction(no_delete_mapping_action)  # type: ignore[misc]
     
     def showSaveConfigWindow(self) -> None:
         """Show save configuration dialog"""
