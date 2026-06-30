@@ -17,19 +17,19 @@
     colorlinks=true,
     linkcolor=blue,
     urlcolor=blue,
-    pdftitle={Survey Workbench v2.0 - User Manual},
+    pdftitle={Survey Workbench v2.1 - User Manual},
     pdfauthor={}
 }
 
 \pagestyle{fancy}
 \fancyhf{}
-\fancyhead[L]{Survey Workbench v2.0}
+\fancyhead[L]{Survey Workbench v2.1}
 \fancyhead[R]{\thepage}
 \renewcommand{\headrulewidth}{0.4pt}
 
-\title{\textbf{Survey Workbench v2.0}\\[0.5em]\Large User Manual}
+\title{\textbf{Survey Workbench v2.1}\\[0.5em]\Large User Manual}
 \author{}
-\date{February 2026}
+\date{June 2026}
 
 \begin{document}
 
@@ -38,7 +38,7 @@
 
 \vfill
 \begin{center}
-\textit{Version 2.0 -- Internal Use Only}
+\textit{Version 2.1 -- Internal Use Only}
 \end{center}
 \newpage
 
@@ -47,7 +47,7 @@
 
 \section{Overview}
 
-The Survey Workbench is a comprehensive tool for managing participant folders and extracting survey data from questionnaires. Version 2.0 introduces dynamic questionnaire support, allowing unlimited questionnaire types per participant.
+The Survey Workbench is a comprehensive tool for managing participant folders and extracting survey data from questionnaires. Version 2.1 introduces field mapping auto-generation from form templates, non-participant-specific column naming for multi-participant files, and streamlined configuration management.
 
 \subsection{Key Features}
 \begin{itemize}
@@ -68,7 +68,7 @@ The Survey Workbench is a comprehensive tool for managing participant folders an
 
 \section{Getting Started}
 
-When you first launch Survey Workbench v2.0, you'll see the main window with two primary sections:
+When you first launch Survey Workbench v2.1, you'll see the main window with two primary sections:
 
 \begin{enumerate}
     \item \textbf{Generate Participant Folder} -- Creates organized folders with questionnaires
@@ -271,9 +271,10 @@ Click \textbf{Extract Data to Masterfile}. The system will automatically detect 
 
 \begin{itemize}
     \item Participant ID is written in the first column
-    \item Each field gets a column named \texttt{\{SurveyType\}\_\{FieldName\}}, or its mapped friendly name if a field mapping is configured
+    \item Each field gets a column named with the field identifier (e.g., \texttt{Age}, \texttt{Mental\_Demand}), or its mapped friendly name if a field mapping is configured
+    \item Column names are \textit{non-participant-specific}, allowing multiple participants to be added to the same masterfile
     \item Checkbox groups (e.g., \texttt{Check1\_1}, \texttt{Check1\_2}) are collapsed into a single column (e.g., \texttt{Check1}) containing the option number that was checked
-    \item Example columns: \texttt{demographics\_Age}, \texttt{nasa1\_Mental\_Demand}, \texttt{Gender} (if \texttt{Check1} is mapped to ``Gender'')
+    \item Example columns: \texttt{Age}, \texttt{Mental\_Demand}, \texttt{Gender} (if \texttt{Check1} is mapped to ``Gender'')
 \end{itemize}
 
 \subsubsection{Step 5: Verify Results}
@@ -298,29 +299,38 @@ Save and load your questionnaire configurations for repeated use.
 \subsubsection{What's Saved}
 
 \begin{itemize}
-    \item Target folder path
+    \item Target folder path (for generation)
     \item Number of questionnaire types
     \item All questionnaire names, template paths, and copy counts
     \item Source folder path (for extraction)
-    \item Excel file path (for extraction)
-    \item Field mapping (system field names $\rightarrow$ user-friendly column names)
+    \item Masterfile path (for extraction)
+    \item \textbf{Field mapping} (system field identifiers $\rightarrow$ user-friendly column names) -- auto-generated from templates and editable via \textit{Save/Edit Field Mapping}
 \end{itemize}
 
 \subsection{Field Mapping}
 
-Field mapping defines user-friendly names for system field identifiers (e.g., mapping \texttt{demographics\_Check1} to ``Gender''). These names appear in the prefill dialog and as column headers in the masterfile.
+Field mapping defines user-friendly names for system field identifiers (e.g., mapping \texttt{Check1} to ``Gender''). These names appear in the prefill dialog and as column headers in the masterfile.
+
+\subsubsection{Auto-Generation}
+
+When you click \textbf{File $\rightarrow$ Save/Edit Field Mapping}, the system automatically scans your configured form templates and generates an initial field mapping. This ensures the mapping always matches the actual form fields in your templates.
+
+\subsubsection{Editing the Mapping}
 
 \begin{enumerate}
     \item Go to \textbf{File $\rightarrow$ Save/Edit Field Mapping}
-    \item A table shows all fields (\textbf{Field} column, read-only) and their current names (\textbf{Name} column, editable)
-    \item Edit the Name column to set user-friendly labels
-    \item Click \textbf{Save} -- the mapping is persisted to the active configuration
+    \item A table shows all fields (\textbf{Field} column, read-only) auto-detected from your form templates
+    \item Edit the \textbf{Name} column to set user-friendly labels
+    \item Click \textbf{Save} -- the mapping is saved to the active configuration
 \end{enumerate}
 
+\subsubsection{Persistence}
+
 \begin{itemize}
-    \item Load a field mapping from another configuration via \textbf{File $\rightarrow$ Load Field Mapping}
-    \item Delete a mapping via \textbf{File $\rightarrow$ Delete Field Mapping}
-    \item The mapping is automatically applied when extracting data and during the prefill dialog
+    \item The mapping is automatically saved with your project configuration
+    \item When you load a configuration, its field mapping loads automatically
+    \item The mapping is applied when extracting data and during the prefill dialog
+    \item No separate load/delete operations needed -- field mappings are integral to the project configuration
 \end{itemize}
 
 \subsubsection{Overwriting Configurations}
@@ -483,6 +493,16 @@ For consistent CSV extraction, name PDF form fields using this pattern:
 
 \subsection{Version History}
 
+\subsubsection{v2.1 (June 2026)}
+\begin{itemize}
+    \item Field mapping auto-generated from form templates
+    \item Non-participant-specific column names (support multiple participants per masterfile)
+    \item Streamlined field mapping workflow (integrated with project configuration)
+    \item Removed redundant load/delete field mapping operations
+    \item Enhanced type hints and code quality
+    \item Updated documentation for v2.1 features
+\end{itemize}
+
 \subsubsection{v2.0 (February 2026)}
 \begin{itemize}
     \item Dynamic questionnaire support (unlimited types)
@@ -504,8 +524,8 @@ For consistent CSV extraction, name PDF form fields using this pattern:
 \subsection{Credits}
 
 \begin{tabular}{ll}
-\textbf{Version:} & 2.0 \\
-\textbf{Release Date:} & February 2026 \\
+\textbf{Version:} & 2.1 \\
+\textbf{Release Date:} & June 2026 \\
 \end{tabular}
 
 \subsection{Technology Stack}
@@ -524,8 +544,8 @@ For technical support or feature requests, please refer to your organization's s
 \vfill
 \begin{center}
 \rule{0.5\textwidth}{0.4pt}\\[0.5em]
-\textit{Survey Workbench v2.0 -- User Manual}\\[0.5em]
-\textit{February 2026}
+\textit{Survey Workbench v2.1 -- User Manual}\\[0.5em]
+\textit{June 2026}
 \end{center}
 
 \end{document}
