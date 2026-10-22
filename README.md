@@ -260,11 +260,19 @@ For issues, feature requests, or questions:
 
 ## License
 
+<<<<<<< HEAD
 This project is licensed under the **MIT License**. See [LICENSE](LICENSE) file for full terms and conditions.
 
 **Copyright © 2026 Cagatay Özcan Jagiello Gutt, Survey Workbench Contributors**
 
 The MIT License permits free use, modification, and distribution, provided that copyright attribution is retained in all distributed copies and derivative works.
+=======
+This project is licensed under the **MIT License** — See [LICENSE](LICENSE) file for details.
+
+**Copyright © 2026 Cagatay Özcan Jagiello Gutt (Original Creator and Developer)**
+
+The MIT License permits free use, modification, and distribution while preserving this copyright attribution. Your creative work and engineering effort are permanently credited as the original creator of this tool.
+>>>>>>> 01e08570752b33ec8f239973e55365a9c4c4a84e
 
 ---
 
