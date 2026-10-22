@@ -1,194 +1,271 @@
-# Survey Workbench v2.0
+# Survey Workbench v2.1
 
-> A comprehensive participant data management system for survey research with dynamic questionnaire configuration and batch processing capabilities.
-
-[![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/)
-[![PyQt5](https://img.shields.io/badge/GUI-PyQt5-green.svg)](https://www.riverbankcomputing.com/software/pyqt/)
-[![License](https://img.shields.io/badge/License-Internal_Use-red.svg)]()
+A comprehensive tool for managing participant folders and extracting survey data from PDF questionnaires with automated field mapping and Excel integration.
 
 ## Overview
 
-Survey Workbench is a desktop application designed to streamline the management of participant folders and extraction of survey data from questionnaires. Built with PyQt5, it provides an intuitive graphical interface for researchers and data managers to efficiently organize and process survey data.
+Survey Workbench is designed to streamline the workflow of:
+1. **Generating** standardized participant folders with multiple questionnaire types
+2. **Prefilling** PDF forms with default values before participant handover
+3. **Extracting** completed survey data directly into Excel/CSV masterfiles
+4. **Managing** field mappings for user-friendly column names
 
 ### Key Features
 
-- **🔧 Dynamic Questionnaire Configuration**: Support for unlimited questionnaire types per participant with flexible template management
-- **📦 Batch Processing**: Generate and extract data for multiple participants simultaneously
-- **📥 Participant Import**: Import participant lists from .txt or .csv files
-- **📋 Template Bundles**: Create and reuse questionnaire configuration bundles across projects
-- **🔍 Duplicate Detection**: Automatic masterfile checking (supports CSV and Excel formats) to prevent duplicate entries
-- **✅ Data Completeness Verification**: Validate all required data before extraction
-- **👁️ Preview Dialog**: Review extracted data before finalizing
-- **📊 Missing Data Report**: Generate quality control reports for incomplete data
-- **💾 Configuration Management**: Save, load, and manage multiple configurations with an intuitive submenu interface
-- **❓ Interactive Help System**: Built-in tooltips and "What's This?" mode for user assistance
-- **📑 Auto-Format Detection**: Automatically detect masterfile format (CSV, XLS, XLSX)
+- **Dynamic Questionnaire Configuration** — Support unlimited questionnaire types per participant
+- **Auto-Generated Field Mapping** — Automatically scans form templates and generates field mappings
+- **Non-Participant-Specific Columns** — Multiple participants in a single masterfile without naming conflicts
+- **Grouped Checkboxes** — Automatically collapses checkbox arrays (Check1_1, Check1_2, etc.) into single columns
+- **Prefill Dialog** — Populate PDF form fields before participant handover with a graphical interface
+- **Multiple Export Formats** — Support for CSV, XLS, and XLSX masterfiles
+- **Configuration Persistence** — Save and load complete project configurations including field mappings
+- **Type-Safe Codebase** — Full Python type hints for reliability and IDE support
 
 ## System Requirements
 
-- **Operating System**: Windows 10/11, macOS 10.14+, or Linux
-- **Python**: 3.8 or higher
-- **Microsoft Excel**: Required for Excel file operations (via xlwings)
-- **Memory**: 4GB RAM minimum (8GB recommended for large datasets)
-- **Storage**: 100MB free space minimum
+- **OS:** Windows 10/11
+- **Python:** 3.10+ (if running from source)
+- **Excel:** Microsoft Excel (for XLS/XLSX export)
+- **RAM:** 2GB minimum
+- **Storage:** Sufficient space for participant folders and questionnaire PDFs
 
 ## Installation
 
-### Prerequisites
+### Using the Executable
 
-Ensure you have Python 3.8+ installed on your system. You can download it from [python.org](https://www.python.org/downloads/).
+1. Download `survey_workbench_v2.1.exe` from the `dist/` folder
+2. Run the executable — no installation needed
+3. The first launch will create a `config.ini` file in the same directory
 
-### Install Dependencies
-
-```bash
-# Clone the repository
-git clone https://github.com/CGutt-hub/surveyWorkbench.git
-cd surveyWorkbench
-
-# Install required Python packages
-pip install PyQt5 xlwings configparser
-```
-
-### Additional Setup
-
-For Excel integration (xlwings), you may need to install the Excel add-in:
+### From Source
 
 ```bash
-xlwings addin install
+# Clone or extract the repository
+cd survey_workbench - v2.1
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Run the application
+python survey_workbench_v2.1.py
 ```
+
+**Dependencies:**
+- PyQt5 (GUI framework)
+- xlwings (Excel integration)
+- pypdf (PDF processing)
 
 ## Quick Start
 
-### Running the Application
+### 1. Generate Participant Folders
 
-```bash
-python survey_workbench.py
+1. **Configure Questionnaires**
+   - Enter participant ID (e.g., `P_001`)
+   - Select target folder for participant directories
+   - Add questionnaire types (name, PDF template, copy count)
+
+2. **Generate**
+   - Click "Generate Participant Folder"
+   - System creates organized folder structure
+   - Prefill dialog appears for optional value population
+
+3. **Prefill (Optional)**
+   - Edit field values in the dialog
+   - Check/uncheck options for checkboxes
+   - Click "Confirm" to save prefill values to PDFs
+
+### 2. Extract Survey Data
+
+1. **Configure Extraction**
+   - Select source folder (contains completed participant folders)
+   - Select masterfile (CSV, XLS, or XLSX)
+   - Enter participant ID to extract
+
+2. **Extract**
+   - Click "Extract Data to Masterfile"
+   - System automatically detects file format
+   - Data is appended as new row with proper field mapping
+
+3. **Verify**
+   - Check masterfile for new row with mapped column names
+   - Checkpoint values appear as option numbers (1, 2, 3, etc.)
+
+### 3. Manage Field Mappings
+
+1. **Edit Field Mapping**
+   - Click "File → Save/Edit Field Mapping"
+   - System auto-scans form templates and shows detected fields
+   - Edit "Name" column to set user-friendly column headers
+   - Click "Save" to persist to project configuration
+
+2. **Save Configuration**
+   - Click "File → Save Configuration"
+   - Enter configuration name
+   - Settings, questionnaires, AND field mapping are saved together
+
+3. **Load Configuration**
+   - Click "File → Load Configuration" (from menu)
+   - Select previous configuration
+   - Everything restores: questionnaires, paths, AND field mapping
+
+## Data Organization
+
+### Column Naming
+
+- **Previous (v2.0):** `P_001_Demographics_Age` (participant-specific)
+- **Current (v2.1):** `Age` (mapped friendly name) or `Demographics_Age` (system name)
+- **Benefit:** Multiple participants can coexist in one masterfile
+
+### Checkbox Handling
+
+Checkboxes in PDFs use naming convention:
+- `Check1_1`, `Check1_2`, `Check1_3` (individual options)
+- Grouped as: `Check1` (single column)
+- Value: option number that was checked (e.g., `1`, `2`, or `3`)
+- System translates to/from PDF values (`/Yes`, `/Off`, `/On`) automatically
+
+### Example Data Row
+
+| participant_id | Age | Gender | Mental_Demand | Score |
+|---|---|---|---|---|
+| P_001 | 28 | 1 | 7.5 | 68 |
+| P_002 | 35 | 2 | 5.2 | 72 |
+
+## Configuration Files
+
+### config.ini
+
+Stores all project configurations. Each `[section]` is a named configuration:
+
+```ini
+[MyProject]
+target_path = C:\Studies\MyProject\Participants
+source_path = C:\Studies\MyProject\Completed
+excel_path = C:\Studies\MyProject\masterfile.xlsx
+quest_count = 3
+quest_0_name = Demographics
+quest_0_path = C:\Templates\demographics.pdf
+quest_0_count = 1
+field_mapping_json = {"Demographics_Age": "Age", "Check1": "Gender"}
 ```
 
-Or run the compiled executable (if available):
+Each configuration saves:
+- Questionnaire setup (names, paths, counts)
+- Source/target/excel paths
+- **Field mapping** (system names → friendly names)
 
-```bash
-./survey_workbench_v2.0  # On Linux/macOS
-survey_workbench_v2.0.exe  # On Windows
-```
-
-### Basic Workflow
-
-1. **Configure Questionnaires**: Set up your questionnaire templates and target folders
-2. **Generate Participant Folders**: Create participant-specific folders with questionnaire templates
-3. **Fill Out Questionnaires**: Have participants complete their questionnaires
-4. **Extract Data**: Collect and consolidate data from completed questionnaires into a masterfile
-
-## Usage
-
-### Generate Participant Folders
-
-1. Select template files for each questionnaire type
-2. Specify the target folder where participant folders will be created
-3. Enter participant IDs (manual entry or import from file)
-4. Click "Generate Participant Folder" to create the folder structure
-
-**Batch Mode**: Enable batch mode to process multiple participants at once by importing a list from .txt or .csv files.
-
-### Extract Data
-
-1. Select the source folder containing participant folders
-2. Choose the masterfile (CSV or Excel) where data will be extracted
-3. Configure questionnaire-specific extraction settings:
-   - Excel sheet names
-   - Column filters
-   - Multiple questionnaire copies
-4. Click "Extract Data" to consolidate participant data
-
-**Features**:
-- **Duplicate Detection**: Automatically checks if participant data already exists in the masterfile
-- **Data Completeness Check**: Verifies all required questionnaires are present before extraction
-- **Preview Dialog**: Review data before final extraction
-- **Missing Data Report**: Generate reports for participants with incomplete data
-
-### Configuration Management
-
-Save and load configurations to quickly switch between different project setups:
-
-- **Save Configuration**: Store your current questionnaire setup and settings
-- **Load Configuration**: Quickly restore a previously saved configuration
-- **Delete Configuration**: Remove outdated configurations
-- **Recent Configurations**: Access recently used configurations from the menu
-
-### Template Bundles
-
-Create reusable template bundles for standardized project setups:
-
-1. Configure all questionnaires and settings
-2. Select "Save Template Bundle" from the menu
-3. Load the bundle in future projects to instantly apply the same configuration
-
-## File Structure
+## Workflow Example
 
 ```
-surveyWorkbench/
-├── survey_workbench.py      # Main application source code
-├── survey_workbench.spec    # PyInstaller build specification
-├── config.ini               # Configuration storage file
-├── USER_MANUAL.pdf          # Comprehensive user manual
-├── USER_MANUAL.tex          # LaTeX source for user manual
-└── README.md                # This file
+1. Create configuration "MyStudy_2026"
+   ├─ Add questionnaires: demographics.pdf, survey-tlx.pdf
+   ├─ Set target folder: C:\Studies\MyStudy\Participants
+   └─ Save configuration
+
+2. Generate participant folders
+   ├─ ID: P_001
+   ├─ Creates: P_001/
+   │   ├─ P_001_demographics.pdf
+   │   └─ P_001_survey-tlx.pdf
+   └─ Prefill optional values
+
+3. Participant completes questionnaires
+   └─ Returns completed PDFs
+
+4. Edit field mapping (optional)
+   ├─ "Demographics_Age" → "Age"
+   ├─ "Check1" → "Gender"
+   └─ Save to configuration
+
+5. Extract data
+   ├─ Source: C:\Studies\MyStudy\Completed\P_001/
+   ├─ Masterfile: C:\Studies\MyStudy\masterfile.xlsx
+   └─ Appends row with mapped column names
 ```
 
-## Technology Stack
+## Menu Reference
 
-- **GUI Framework**: PyQt5 - Cross-platform graphical user interface
-- **Excel Integration**: xlwings - Python library for Excel automation
-- **Configuration**: ConfigParser - INI file handling for settings persistence
-- **Build Tool**: PyInstaller - Executable packaging (see survey_workbench.spec)
-- **Type Hints**: Full type annotation support for better code maintainability
+### File Menu
+- **Save Configuration** — Save current setup with field mappings
+- **Load Configuration** — Load previous project setup
+- **Delete Configuration** — Remove saved configuration
+- **Save/Edit Field Mapping** — Edit field-to-column-name mappings (auto-scans templates)
+- **Exit** — Close the application
 
-## Documentation
+### Generation Section
+- **Generate Participant Folder** — Create folders with questionnaires and optional prefill
 
-For detailed documentation, including screenshots and step-by-step guides, please refer to the [USER_MANUAL.pdf](USER_MANUAL.pdf) included in this repository.
+### Extraction Section
+- **Extract Data to Masterfile** — Append completed survey data to masterfile
+
+## Technical Details
+
+### Version: 2.1 (June 2026)
+
+**Changes from v2.0:**
+- Field mapping auto-generated from form templates
+- Non-participant-specific column names
+- Integrated field mapping with project configuration
+- Removed redundant load/delete field mapping operations
+- Enhanced type hints and code quality
+
+### Technology Stack
+
+- **Python:** 3.13.7
+- **GUI:** PyQt5 5.15.11
+- **PDF Processing:** pypdf 4.0+
+- **Excel Integration:** xlwings 0.33.20
+- **Packaging:** PyInstaller 6.14.2
+
+### Supported File Formats
+
+- **PDF:** Standard AcroForm fields (text, checkboxes, radio buttons)
+- **CSV:** UTF-8 encoded, comma-delimited
+- **Excel:** XLS (2003), XLSX (2007+)
 
 ## Troubleshooting
 
-### Common Issues
+### "No fields found in configured templates"
+- Verify template PDF paths are correct
+- Ensure PDFs have form fields (AcroForm structure)
+- Check file permissions
 
-- **Excel not found**: Ensure Microsoft Excel is installed and xlwings is properly configured
-- **Configuration not saving**: Check write permissions for config.ini file
-- **Import errors**: Verify all dependencies are installed with `pip list`
-- **Template files not copying**: Ensure source template files exist and have read permissions
+### "Field mapping does not match configured forms"
+- Forms have changed since configuration was created
+- Click "Save/Edit Field Mapping" to regenerate from current templates
+- Review and adjust friendly names, then save
 
-For more troubleshooting tips, consult the USER_MANUAL.pdf.
+### Excel file not updating
+- Ensure masterfile is not open in Excel
+- Verify path is correct and file is accessible
+- Check that sheet named "Data" exists (or first sheet is used)
 
-## Version History
+### Checkbox values not appearing
+- Verify checkbox field names follow pattern: `Check{N}_{option}`
+- Ensure option numbers are sequential (1, 2, 3...)
+- Check that at least one checkbox is checked in the PDF
 
-### Version 2.0 (February 2026)
-- Dynamic questionnaire support with unlimited types
-- Enhanced batch processing capabilities
-- Template bundle system
-- Improved duplicate detection
-- Data completeness verification
-- Preview dialog for data extraction
-- Missing data reporting
-- Interactive help system
+## Documentation
 
-### Version 1.0 (April 2024)
-- Initial release
-- Basic participant folder generation
-- Simple data extraction
-
-## Author
-
-**Cagatay Gutt**
-- Created: April 15, 2024
-- Last Updated: February 4, 2026
-
-## License
-
-This software is for internal use only. All rights reserved.
+- **USER_MANUAL.pdf** — Comprehensive user guide with screenshots and step-by-step instructions
+- **README.md** — This file, quick reference and overview
 
 ## Support
 
-For questions, issues, or feature requests, please contact the project maintainer or refer to the comprehensive USER_MANUAL.pdf for detailed guidance.
+For issues, feature requests, or questions:
+1. Check USER_MANUAL.pdf for detailed guidance
+2. Review configuration in config.ini
+3. Verify file paths and permissions
+4. Consult "Troubleshooting" section above
+
+## License
+
+This project is licensed under the **MIT License**. See [LICENSE](LICENSE) file for full terms and conditions.
+
+**Copyright © 2026 Cagatay Özcan Jagiello Gutt, Survey Workbench Contributors**
+
+The MIT License permits free use, modification, and distribution, provided that copyright attribution is retained in all distributed copies and derivative works.
 
 ---
 
-*Survey Workbench - Streamlining survey data management for research excellence.*
+**Survey Workbench v2.1** | June 2026 | Open-Source PDF Form Extraction Tool
