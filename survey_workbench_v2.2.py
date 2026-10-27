@@ -7,10 +7,10 @@ Author: Cagatay Gutt
 Last Updated: 2026
 
 Features:
-- Config snapshotting: Saves template paths, copy counts, paths, AND complete column remappings into config.ini.
-- Fully qualified mapping keys ({survey}_{field}) preventing cross-sheet name collisions (e.g. demographics_Check1 vs protocol_Check1).
-- Dedicated sheets per root PDF in Excel with Column A as 'participant_id'.
-- Natural numerical sorting (Text1, Text2... Text10) across all sheets and dialogs.
+- Config snapshotting: Saves template paths, copy counts, paths, AND complete column remappings into config.ini[cite: 1].
+- Fully qualified mapping keys ({survey}_{field}) preventing cross-sheet name collisions (e.g. demographics_Check1 vs protocol_Check1)[cite: 1].
+- Dedicated sheets per root PDF in Excel with Column A as 'participant_id'[cite: 1].
+- Natural numerical sorting (Text1, Text2... Text10) across all sheets and dialogs[cite: 1].
 """
 
 import sys
@@ -710,7 +710,7 @@ class MainWindow(QMainWindow):
         table.setRowCount(len(rows))
         for idx, (combined_field, display_name, value) in enumerate(rows):
             field_item = QTableWidgetItem(combined_field)
-            field_item.setFlags(field_item.flags() & Qt.ItemFlag.NoItemFlags)
+            field_item.setFlags(field_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             name_item = QTableWidgetItem(display_name)
             name_item.setFlags(name_item.flags() | Qt.ItemFlag.ItemIsEditable)
             table.setItem(idx, 0, field_item)
@@ -767,7 +767,6 @@ class MainWindow(QMainWindow):
                 else:
                     prefill_values[pdf_path][field_name] = val
 
-            # Persist updated mapping if active config is loaded
             if self.active_config_name:
                 self._save_mapping_to_config(self.active_config_name, self.field_mapping)
 
@@ -848,7 +847,7 @@ class MainWindow(QMainWindow):
         return sheet_data
 
     def _readout_single(self, participant_id: str, sheet_data: Optional[Dict[str, Dict[str, Any]]] = None) -> None:
-        """Route each root PDF's extracted data to its own dedicated worksheet in root order."""
+        """Route each root PDF's extracted data to its own dedicated worksheet with smart row placement and duplicate/overwrite detection."""
         if sheet_data is None:
             sheet_data = self._prepare_data_for_extraction(participant_id)
 
@@ -874,7 +873,6 @@ class MainWindow(QMainWindow):
 
                     for key in sorted_field_keys:
                         value = raw_data[key]
-                        # Look up candidate keys: exact scoped key, sheet_scoped key, or base key
                         col_name = self.field_mapping.get(key)
                         if not col_name:
                             col_name = self.field_mapping.get(f"{sheet_name}_{key}")
@@ -886,29 +884,43 @@ class MainWindow(QMainWindow):
                         export_data[col_name or key] = value
 
                     sheet_names = [cast(str, s.name) for s in wb.sheets]
+                    
+                    # IF-ELSE block for existing vs new sheet handling
                     if sheet_name in sheet_names:
                         sheet: xlw.Sheet = cast(xlw.Sheet, wb.sheets[sheet_name])
-                    else:
-                        if len(wb.sheets) == 1 and wb.sheets[0].range('A1').value is None:
-                            sheet = cast(xlw.Sheet, wb.sheets[0])
-                            sheet.name = sheet_name
-                        else:
-                            sheet = cast(xlw.Sheet, wb.sheets.add(name=sheet_name, after=wb.sheets[-1]))
+                        
+                        first_row = sheet.range('1:1').value
+                        header_map: Dict[str, int] = {}
+                        if first_row:
+                            row_vals = first_row if isinstance(first_row, list) else [first_row]
+                            for c_idx, val in enumerate(row_vals, start=1):
+                                if val is not None and str(val).strip():
+                                    header_map[str(val).strip()] = c_idx
 
-                    first_row = sheet.range('1:1').value
-                    header_map: Dict[str, int] = {}
-                    if first_row:
-                        row_vals = first_row if isinstance(first_row, list) else [first_row]
-                        for c_idx, val in enumerate(row_vals, start=1):
-                            if val is not None and str(val).strip():
-                                header_map[str(val).strip()] = c_idx
+                        # Strict scientific schema validation
+                        existing_cols = set(header_map.keys())
+                        incoming_cols = set(export_data.keys())
+                        
+                        if existing_cols != incoming_cols:
+                            missing = existing_cols - incoming_cols
+                            extra = incoming_cols - existing_cols
+                            msg = (f"Schema Mismatch Detected in Sheet '{sheet_name}' for participant '{participant_id}'!\n\n"
+                                   f"The columns in the masterfile do not match the incoming data structure.\n")
+                            if missing:
+                                msg += f"\nMissing from incoming data: {list(missing)}"
+                            if extra:
+                                msg += f"\nUnexpected/Extra in incoming data: {list(extra)}"
+                            msg += "\n\nDo you want to proceed anyway (post-hoc adaptation)?"
+                            
+                            reply = QMessageBox.question(
+                                self, "Schema Mismatch Warning", msg,
+                                cast(QMessageBox.StandardButton, QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No),
+                                QMessageBox.StandardButton.No
+                            )
+                            if reply == QMessageBox.StandardButton.No:
+                                raise ValueError(f"Extraction aborted due to schema mismatch in sheet '{sheet_name}'.")
 
-                    if not header_map:
-                        headers = list(export_data.keys())
-                        for idx, header in enumerate(headers, start=1):
-                            sheet.range(1, idx).value = header
-                        header_map = {h: idx for idx, h in enumerate(headers, start=1)}
-                    else:
+                        # Ensure any newly acknowledged columns are safely added to header_map
                         next_col = max(header_map.values(), default=0) + 1
                         for key in export_data.keys():
                             if key not in header_map:
@@ -916,10 +928,54 @@ class MainWindow(QMainWindow):
                                 header_map[key] = next_col
                                 next_col += 1
 
-                    next_row = 2
-                    while sheet.range(f'A{next_row}').value is not None:
-                        next_row += 1
+                        # Check if participant_id already exists in Column A (Row 2 onwards) to allow safe overwriting/re-establishing
+                        target_row = None
+                        r_idx = 2
+                        while True:
+                            val = sheet.range(f'A{r_idx}').value
+                            if val is None:
+                                break
+                            if str(val).strip() == str(participant_id):
+                                target_row = r_idx
+                                break
+                            r_idx += 1
 
+                        if target_row is not None:
+                            # Prompt user if they want to overwrite the existing broken/mistaken entry record
+                            ov_reply = QMessageBox.question(
+                                self, "Existing Participant Record Found",
+                                f"Participant ID '{participant_id}' already exists at row {target_row} in sheet '{sheet_name}'.\n\n"
+                                f"Do you want to overwrite this existing entry (e.g. to re-establish a corrected record)?",
+                                cast(QMessageBox.StandardButton, QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No),
+                                QMessageBox.StandardButton.No
+                            )
+                            if ov_reply == QMessageBox.StandardButton.Yes:
+                                next_row = target_row
+                            else:
+                                raise ValueError(f"Extraction cancelled: Participant '{participant_id}' already exists at row {target_row}.")
+                        else:
+                            # Standard next available row (x + 1 where headers occupy row 1)
+                            next_row = 2
+                            while sheet.range(f'A{next_row}').value is not None:
+                                next_row += 1
+
+                    else:
+                        # First-entry case: Sheet does not exist yet
+                        if len(wb.sheets) == 1 and wb.sheets[0].range('A1').value is None:
+                            sheet = cast(xlw.Sheet, wb.sheets[0])
+                            sheet.name = sheet_name
+                        else:
+                            sheet = cast(xlw.Sheet, wb.sheets.add(name=sheet_name, after=wb.sheets[-1]))
+
+                        headers = list(export_data.keys())
+                        header_map = {}
+                        for idx, header in enumerate(headers, start=1):
+                            sheet.range(1, idx).value = header
+                            header_map[header] = idx
+
+                        next_row = 2
+
+                    # Write data values into target/next row
                     for key, val in export_data.items():
                         col_idx = header_map.get(key)
                         if col_idx:
@@ -956,21 +1012,53 @@ class MainWindow(QMainWindow):
                         existing_headers = list(reader.fieldnames) if reader.fieldnames else []
                         existing_rows = list(reader)
 
+                    # Strict schema validation for CSV
+                    existing_cols = set(existing_headers)
+                    incoming_cols = set(export_data.keys())
+                    if existing_cols != incoming_cols:
+                        missing = existing_cols - incoming_cols
+                        extra = incoming_cols - existing_cols
+                        msg = (f"Schema Mismatch Detected in CSV '{sheet_name}' for participant '{participant_id}'!\n\n")
+                        if missing:
+                            msg += f"Missing from incoming data: {list(missing)}\n"
+                        if extra:
+                            msg += f"Unexpected/Extra in incoming data: {list(extra)}\n"
+                        msg += "\nDo you want to proceed anyway?"
+                        
+                        if QMessageBox.question(self, "Schema Mismatch Warning", msg,
+                                                cast(QMessageBox.StandardButton, QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No),
+                                                QMessageBox.StandardButton.No) == QMessageBox.StandardButton.No:
+                            raise ValueError(f"Extraction aborted due to schema mismatch in CSV '{sheet_name}'.")
+
+                # Handle duplicate/overwrite check for CSV rows
+                existing_index = -1
+                for idx, row in enumerate(existing_rows):
+                    if row.get('participant_id') == participant_id:
+                        existing_index = idx
+                        break
+
+                if existing_index != -1:
+                    ov_reply = QMessageBox.question(
+                        self, "Existing Participant Record Found",
+                        f"Participant ID '{participant_id}' already exists in CSV '{sheet_name}'.\n\n"
+                        f"Do you want to overwrite this existing entry?",
+                        cast(QMessageBox.StandardButton, QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No),
+                        QMessageBox.StandardButton.No
+                    )
+                    if ov_reply == QMessageBox.StandardButton.Yes:
+                        existing_rows[existing_index] = export_data
+                    else:
+                        raise ValueError(f"Extraction cancelled: Participant '{participant_id}' already exists in CSV '{sheet_name}'.")
+                else:
+                    existing_rows.append(export_data)
+
                 new_headers = [k for k in export_data.keys() if k not in existing_headers]
                 all_headers = existing_headers + new_headers if existing_headers else list(export_data.keys())
 
-                if new_headers and file_exists:
-                    with open(target_csv, 'w', newline='', encoding='utf-8') as f:
-                        writer = csv.DictWriter(f, fieldnames=all_headers)
-                        writer.writeheader()
-                        writer.writerows(existing_rows)
-                        writer.writerow(export_data)
-                else:
-                    with open(target_csv, 'a', newline='', encoding='utf-8') as f:
-                        writer = csv.DictWriter(f, fieldnames=all_headers)
-                        if not file_exists:
-                            writer.writeheader()
-                        writer.writerow(export_data)
+                with open(target_csv, 'w', newline='', encoding='utf-8') as f:
+                    writer = csv.DictWriter(f, fieldnames=all_headers)
+                    writer.writeheader()
+                    writer.writerows(existing_rows)
         else:
             raise ValueError(f"Unsupported masterfile format: {file_ext}")
 
@@ -987,12 +1075,8 @@ class MainWindow(QMainWindow):
             
             success_count = 0
             failed: List[str] = []
-            duplicates: List[str] = []
             
             for pid in participant_ids:
-                if self.checkDuplicate(pid):
-                    duplicates.append(pid)
-                    continue
                 try:
                     self._readout_single(pid)
                     success_count += 1
@@ -1000,20 +1084,13 @@ class MainWindow(QMainWindow):
                     failed.append(f"{pid}: {str(e)}")
             
             msg = f"Extracted {success_count} of {len(participant_ids)} participants successfully!"
-            if duplicates:
-                msg += f"\n\nSkipped duplicates:\n" + "\n".join(duplicates)
             if failed:
-                msg += f"\n\nFailed:\n" + "\n".join(failed)
+                msg += f"\n\nFailed/Skipped:\n" + "\n".join(failed)
             QMessageBox.information(self, "Batch Extraction Complete", msg)
         else:
             participant_id = self.nameset.text().strip()
             if not participant_id:
                 return self.error_window("Please enter a participant ID!")
-            
-            if self.checkDuplicate(participant_id):
-                if QMessageBox.question(self, "Duplicate Detected", "Extract anyway?",
-                                        cast(QMessageBox.StandardButton, QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)) == QMessageBox.StandardButton.No:
-                    return
             self.readout()
     
     def readout(self) -> None:
@@ -1065,9 +1142,9 @@ class MainWindow(QMainWindow):
         
         for idx, (s_name, f_key, m_name, val) in enumerate(flat_rows):
             si = QTableWidgetItem(s_name)
-            si.setFlags(Qt.ItemFlag.ItemIsEnabled)
+            si.setFlags(si.flags() & ~Qt.ItemFlag.ItemIsEditable)
             fi = QTableWidgetItem(f_key)
-            fi.setFlags(Qt.ItemFlag.ItemIsEnabled)
+            fi.setFlags(fi.flags() & ~Qt.ItemFlag.ItemIsEditable)
             ni = QTableWidgetItem(m_name)
             ni.setFlags(ni.flags() | Qt.ItemFlag.ItemIsEditable)
             di = QTableWidgetItem(val)
@@ -1107,7 +1184,6 @@ class MainWindow(QMainWindow):
                     self.field_mapping[k] = new_n
                     self.field_mapping[f"{s}_{k}"] = new_n
 
-            # Auto-persist updated mapping to active config
             if self.active_config_name:
                 self._save_mapping_to_config(self.active_config_name, self.field_mapping)
 
@@ -1161,12 +1237,10 @@ class MainWindow(QMainWindow):
         if not expected:
             return self.field_mapping
 
-        # Start with any stored mapping from config
         stored = self._load_mapping_from_config(self.active_config_name) if self.active_config_name else {}
         
         mapping = {}
         for f in sorted(expected, key=natural_sort_key):
-            # Prioritize: 1) stored in config, 2) in-memory field_mapping, 3) identity default
             mapping[f] = stored.get(f, self.field_mapping.get(f, f))
 
         self.field_mapping = mapping
@@ -1234,7 +1308,7 @@ class MainWindow(QMainWindow):
         table.setHorizontalHeaderLabels(["System Field", "Masterfile Column Name"])
         for idx, (k, v) in enumerate(mapping.items()):
             item_k = QTableWidgetItem(k)
-            item_k.setFlags(Qt.ItemFlag.ItemIsEnabled)
+            item_k.setFlags(item_k.flags() & ~Qt.ItemFlag.ItemIsEditable)
             table.setItem(idx, 0, item_k)
             table.setItem(idx, 1, QTableWidgetItem(v))
         table.horizontalHeader().setStretchLastSection(True)
@@ -1312,7 +1386,6 @@ class MainWindow(QMainWindow):
         cfg.set(name, 'source_path', self.source_path)
         cfg.set(name, 'excel_path', self.excel_path)
         
-        # Ensure mapping contains all expected fields and current edits
         self.field_mapping = self._ensure_or_create_field_mapping()
         cfg.set(name, 'field_mapping_json', json.dumps(self.field_mapping, ensure_ascii=False))
         
