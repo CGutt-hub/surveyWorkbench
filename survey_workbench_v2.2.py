@@ -1,14 +1,18 @@
 # -*- coding: utf-8 -*-
 """
 Survey Workbench - Enhanced Participant Data Management System
-Version: 2.1 (Configuration Snapshot & Scoped Field Mapping Edition)
+Version: 2.6 (Dynamic Sizing & Adaptive Layout Edition)
 
 Author: Cagatay Gutt
 Last Updated: 2026
 
 Features:
+- Dynamic window resizing that automatically adapts and shrinks/grows based on presented content and expansion state.
+- Compact participant declaration field with optimized sizing.
+- True collapsible curator configuration container (fully hidden/collapsed by default).
+- Parallelized Batch Mode with single consolidated preview and batch Excel writing.
 - Config snapshotting: Saves template paths, copy counts, paths, AND complete column remappings into config.ini[cite: 1].
-- Fully qualified mapping keys ({survey}_{field}) preventing cross-sheet name collisions (e.g. demographics_Check1 vs protocol_Check1)[cite: 1].
+- Fully qualified mapping keys ({survey}_{field}) preventing cross-sheet name collisions[cite: 1].
 - Dedicated sheets per root PDF in Excel with Column A as 'participant_id'[cite: 1].
 - Natural numerical sorting (Text1, Text2... Text10) across all sheets and dialogs[cite: 1].
 """
@@ -25,19 +29,20 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QPushButton,
                              QFileDialog, QMessageBox, QAction, QStatusBar,
                              QScrollArea, QVBoxLayout, QFrame,
                              QMenu, QDialog, QWhatsThis, QTextEdit, QTableWidget,
-                             QTableWidgetItem, QHeaderView, QCheckBox, QInputDialog)
+                             QTableWidgetItem, QHeaderView, QCheckBox, QInputDialog, QHBoxLayout,
+                             QToolButton)
 from configparser import ConfigParser
-from PyQt5.QtCore import pyqtSignal, Qt
+from PyQt5.QtCore import pyqtSignal, Qt, QTimer
 import xlwings as xlw  # type: ignore[import]
 from pypdf import PdfReader, PdfWriter
 from pypdf.generic import NameObject, create_string_object, ArrayObject
 
-# Canonical grammar for all survey presentations (Section 7.4)
+# Canonical grammar for all survey presentations (Section 7.4)[cite: 1]
 CANONICAL_PATTERN = re.compile(r'^(Text|Check)(\d+)(?:_(\d+))?(_n)?$', re.IGNORECASE)
 
 
 def natural_sort_key(s: Any) -> List[Any]:
-    """Naturally sort alphanumeric strings so Text2 comes before Text10."""
+    """Naturally sort alphanumeric strings so Text2 comes before Text10[cite: 1]."""
     return [int(text) if text.isdigit() else text.lower() for text in re.split(r'(\d+)', str(s))]
 
 
@@ -124,7 +129,7 @@ class QuestionnaireRow:
 class MainWindow(QMainWindow):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Survey Workbench v2.1")
+        self.setWindowTitle("Survey Workbench v2.6")
         
         self.questionnaire_rows: List[QuestionnaireRow] = []
         self.recent_configs_menu: Optional[QMenu] = None
@@ -132,6 +137,7 @@ class MainWindow(QMainWindow):
         
         main_widget = QWidget()
         main_layout = QVBoxLayout()
+        main_layout.setSizeConstraint(QVBoxLayout.SetFixedSize)  # Enables dynamic resizing based on contents
         
         button_action: QAction = QAction("&Save Configuration", self)
         button_action.triggered.connect(self.showSaveConfigWindow)
@@ -165,26 +171,61 @@ class MainWindow(QMainWindow):
         help_menu.addAction(whats_this_action)
         help_menu.addAction(button_action3)
         
-        # ========== GENERATION SECTION ==========
+        # ========== PARTICIPANT DECLARATION SECTION (UNIFIED & COMPACT) ==========
+        part_frame: QFrame = QFrame()
+        part_frame.setFrameStyle(QFrame.Shape.Box | QFrame.Shadow.Raised)
+        part_layout = QGridLayout()
+        
+        part_title = QLabel("Participant Declaration")
+        part_title.setStyleSheet("font-weight: bold; font-size: 13px;")
+        
+        part_label = QLabel("Participant ID(s):")
+        part_label.setStyleSheet("font-weight: bold")
+        self.nameset = QLineEdit()
+        self.nameset.setToolTip("Enter single participant ID (e.g., P001)")
+        
+        self.batch_mode_global = QCheckBox("Batch Mode (multiple IDs)")
+        self.batch_mode_global.toggled.connect(self.toggleBatchModeGlobal)
+        
+        import_list_btn = QPushButton("Import List...")
+        import_list_btn.clicked.connect(lambda: self.importParticipantList(self.batch_text_global))
+        
+        self.batch_text_global = QTextEdit()
+        self.batch_text_global.setPlaceholderText("Enter participant IDs (one per line or comma-separated):\nP001\nP002\nP003")
+        self.batch_text_global.setVisible(False)
+        self.batch_text_global.setMaximumHeight(80)
+        
+        part_layout.addWidget(part_title, 0, 0, 1, 3)
+        part_layout.addWidget(part_label, 1, 0)
+        part_layout.addWidget(self.nameset, 1, 1)
+        part_layout.addWidget(self.batch_mode_global, 1, 2)
+        part_layout.addWidget(import_list_btn, 2, 2)
+        part_layout.addWidget(self.batch_text_global, 2, 0, 1, 2)
+        
+        part_frame.setLayout(part_layout)
+        main_layout.addWidget(part_frame)
+
+        # ========== COLLAPSIBLE CONFIGURATION CONTAINER (HIDDEN BY DEFAULT) ==========
+        self.toggle_config_btn = QToolButton()
+        self.toggle_config_btn.setText("▶ Configuration Settings")
+        self.toggle_config_btn.setStyleSheet("font-weight: bold; border: none; text-align: left; padding: 5px;")
+        self.toggle_config_btn.setCheckable(True)
+        self.toggle_config_btn.setChecked(False)
+        self.toggle_config_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.toggle_config_btn.clicked.connect(self.toggleConfigurationContainer)
+        main_layout.addWidget(self.toggle_config_btn)
+
+        self.config_container = QWidget()
+        config_container_layout = QVBoxLayout()
+        config_container_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Generation Sub-section
         gen_frame: QFrame = QFrame()
         gen_frame.setFrameStyle(QFrame.Shape.Box | QFrame.Shadow.Raised)
         gen_layout = QGridLayout()
         
-        gen_title = QLabel("Generate Participant Folder")
-        gen_title.setStyleSheet("font-weight: bold; font-size: 14px;")
-        
-        part_label = QLabel("Participant ID:")
-        part_label.setStyleSheet("font-weight: bold")
-        self.nameset = QLineEdit()
-        self.nameset.setToolTip("Enter the unique participant identifier (e.g., P001)")
-        
-        self.batch_mode_gen = QCheckBox("Batch Mode (multiple IDs)")
-        self.batch_mode_gen.toggled.connect(self.toggleBatchModeGeneration)
-        
-        self.batch_text_gen = QTextEdit()
-        self.batch_text_gen.setPlaceholderText("Enter participant IDs (one per line or comma-separated):\nP001\nP002\nP003")
-        self.batch_text_gen.setVisible(False)
-        self.batch_text_gen.setMaximumHeight(100)
+        gen_title = QLabel("Generate Participant Folder(s)")
+        gen_title.setStyleSheet("font-weight: bold; font-size: 13px;")
         
         target_label = QLabel("Target folder PATH:")
         self.target_pathset = QLabel()
@@ -197,32 +238,14 @@ class MainWindow(QMainWindow):
         quest_count_button.clicked.connect(self.create_questionnaire_rows)
         
         gen_layout.addWidget(gen_title, 0, 0, 1, 3)
-        gen_layout.addWidget(part_label, 1, 0)
-        gen_layout.addWidget(self.nameset, 1, 1)
-        gen_layout.addWidget(self.batch_mode_gen, 1, 2)
-        
-        import_list_btn_gen = QPushButton("Import List...")
-        import_list_btn_gen.clicked.connect(lambda: self.importParticipantList(self.batch_text_gen))
-        gen_layout.addWidget(import_list_btn_gen, 2, 2)
-        
-        gen_layout.addWidget(self.batch_text_gen, 2, 0, 1, 2)
-        gen_layout.addWidget(target_label, 3, 0)
-        gen_layout.addWidget(self.target_pathset, 3, 1)
-        gen_layout.addWidget(target_pathbut, 3, 2)
-        gen_layout.addWidget(quest_count_label, 4, 0)
-        gen_layout.addWidget(self.quest_count_edit, 4, 1)
-        gen_layout.addWidget(quest_count_button, 4, 2)
-        
-        save_bundle_btn = QPushButton("Save Template Bundle")
-        save_bundle_btn.clicked.connect(self.saveTemplateBundle)
-        gen_layout.addWidget(save_bundle_btn, 5, 0)
-        
-        load_bundle_btn = QPushButton("Load Template Bundle")
-        load_bundle_btn.clicked.connect(self.loadTemplateBundle)
-        gen_layout.addWidget(load_bundle_btn, 5, 1)
-        
+        gen_layout.addWidget(target_label, 1, 0)
+        gen_layout.addWidget(self.target_pathset, 1, 1)
+        gen_layout.addWidget(target_pathbut, 1, 2)
+        gen_layout.addWidget(quest_count_label, 2, 0)
+        gen_layout.addWidget(self.quest_count_edit, 2, 1)
+        gen_layout.addWidget(quest_count_button, 2, 2)
         gen_frame.setLayout(gen_layout)
-        main_layout.addWidget(gen_frame)
+        config_container_layout.addWidget(gen_frame)
         
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
@@ -231,20 +254,15 @@ class MainWindow(QMainWindow):
         self.scroll_widget.setLayout(self.scroll_layout)
         self.scroll_area.setWidget(self.scroll_widget)
         self.scroll_area.setVisible(False)
-        main_layout.addWidget(self.scroll_area)
-        
-        self.generate_button = QPushButton("Generate Participant Folder")
-        self.generate_button.setStyleSheet("font-weight: bold; padding: 10px;")
-        self.generate_button.clicked.connect(self.generate_participant_folder)
-        main_layout.addWidget(self.generate_button)
-        
-        # ========== EXTRACTION SECTION ==========
+        config_container_layout.addWidget(self.scroll_area)
+
+        # Extraction Sub-section
         extract_frame = QFrame()
         extract_frame.setFrameStyle(QFrame.Shape.Box | QFrame.Shadow.Raised)
         extract_layout = QGridLayout()
         
         extract_title = QLabel("Extract Data to Excel")
-        extract_title.setStyleSheet("font-weight: bold; font-size: 14px;")
+        extract_title.setStyleSheet("font-weight: bold; font-size: 13px;")
         
         source_label = QLabel("Source folder PATH:")
         self.source_pathset = QLabel()
@@ -264,31 +282,26 @@ class MainWindow(QMainWindow):
         extract_layout.addWidget(self.excel_pathset, 2, 1)
         extract_layout.addWidget(excel_pathbut, 2, 2)
         
-        self.batch_mode_extract = QCheckBox("Batch Mode (multiple IDs)")
-        self.batch_mode_extract.toggled.connect(self.toggleBatchModeExtraction)
-        extract_layout.addWidget(self.batch_mode_extract, 3, 0)
-        
-        import_list_btn_extract = QPushButton("Import List...")
-        import_list_btn_extract.clicked.connect(lambda: self.importParticipantList(self.batch_text_extract))
-        extract_layout.addWidget(import_list_btn_extract, 3, 2)
-        
-        self.batch_text_extract = QTextEdit()
-        self.batch_text_extract.setPlaceholderText("Enter participant IDs (one per line or comma-separated):\nP001\nP002\nP003")
-        self.batch_text_extract.setVisible(False)
-        self.batch_text_extract.setMaximumHeight(100)
-        extract_layout.addWidget(self.batch_text_extract, 4, 0, 1, 2)
-        
-        missing_data_btn = QPushButton("Missing Data Report")
-        missing_data_btn.clicked.connect(self.generateMissingDataReport)
-        extract_layout.addWidget(missing_data_btn, 5, 2)
-        
         extract_frame.setLayout(extract_layout)
-        main_layout.addWidget(extract_frame)
+        config_container_layout.addWidget(extract_frame)
+
+        self.config_container.setLayout(config_container_layout)
+        self.config_container.setVisible(False)  # Collapsed by default for end-users
+        main_layout.addWidget(self.config_container)
+        
+        # ========== ACTION BUTTONS (ALWAYS VISIBLE FOR END-USERS) ==========
+        action_layout = QHBoxLayout()
+        self.generate_button = QPushButton("Generate Participant Folder(s)")
+        self.generate_button.setStyleSheet("font-weight: bold; padding: 10px;")
+        self.generate_button.clicked.connect(self.generate_participant_folder)
         
         self.extract_button = QPushButton("Extract Data to Masterfile")
         self.extract_button.setStyleSheet("font-weight: bold; padding: 10px;")
         self.extract_button.clicked.connect(self.extract_data)
-        main_layout.addWidget(self.extract_button)
+
+        action_layout.addWidget(self.generate_button)
+        action_layout.addWidget(self.extract_button)
+        main_layout.addLayout(action_layout)
         
         main_widget.setLayout(main_layout)
         self.setCentralWidget(main_widget)
@@ -299,7 +312,19 @@ class MainWindow(QMainWindow):
         self.active_config_name: str = ""
         self.field_mapping: Dict[str, str] = {}
         
-        self.resize(720, 620)
+        # Initial compact sizing and adjustment
+        self.adjustSize()
+
+    def toggleConfigurationContainer(self, checked: bool) -> None:
+        """Toggles the visibility of the configuration container and dynamically adjusts window size."""
+        self.config_container.setVisible(checked)
+        if checked:
+            self.toggle_config_btn.setText("▼ Configuration Settings")
+        else:
+            self.toggle_config_btn.setText("▶ Configuration Settings")
+        
+        # Dynamically resize window to snugly fit current contents
+        QTimer.singleShot(10, self.adjustSize)
 
     def get_configured_root_order(self) -> List[str]:
         """Return root questionnaires in the exact order configured in the UI."""
@@ -358,6 +383,7 @@ class MainWindow(QMainWindow):
                 )
             
             self.scroll_area.setVisible(True)
+            QTimer.singleShot(10, self.adjustSize)
         except ValueError:
             self.error_window("Please enter a valid positive number!")
     
@@ -386,77 +412,68 @@ class MainWindow(QMainWindow):
         )[0]:
             self.excel_path = file_path
             self.excel_pathset.setText(file_path)
+
+    def get_active_participant_ids(self) -> List[str]:
+        if self.batch_mode_global.isChecked():
+            return self.parseParticipantIDs(self.batch_text_global.toPlainText())
+        else:
+            pid = self.nameset.text().strip()
+            return [pid] if pid else []
     
     def generate_participant_folder(self) -> None:
         try:
-            if self.batch_mode_gen.isChecked():
-                participant_ids = self.parseParticipantIDs(self.batch_text_gen.toPlainText())
-                if not participant_ids:
-                    return self.error_window("Please enter at least one participant ID!")
-                
-                success_count = 0
-                failed: List[str] = []
-                for pid in participant_ids:
+            participant_ids = self.get_active_participant_ids()
+            if not participant_ids:
+                return self.error_window("Please enter at least one participant ID!")
+            if not self.target_path:
+                return self.error_window("Please select a target folder! (Expand 'Configuration Settings' to configure paths)")
+            if not self.questionnaire_rows:
+                return self.error_window("Please configure questionnaires! (Expand 'Configuration Settings' to configure templates)")
+
+            all_generated_pdf_paths: Dict[str, List[str]] = {}
+            for pid in participant_ids:
+                participant_folder = os.path.join(self.target_path, pid)
+                if os.path.exists(participant_folder):
+                    shutil.rmtree(participant_folder)
+                os.makedirs(participant_folder)
+
+                generated_pdf_paths: List[str] = []
+                for row in self.questionnaire_rows:
+                    if not row.template_path:
+                        continue
+                    
+                    survey_name = row.name_edit.text().strip() or f"survey_{row.index + 1}"
                     try:
-                        self._generate_single(pid)
-                        success_count += 1
-                    except Exception as e:
-                        failed.append(f"{pid}: {str(e)}")
+                        copy_count = int(row.count_edit.text())
+                    except ValueError:
+                        copy_count = 1
+                    
+                    _, ext = os.path.splitext(os.path.basename(row.template_path))
+                    for i in range(copy_count):
+                        new_filename = f"{pid}_{survey_name}{ext}" if copy_count == 1 else f"{pid}_{survey_name}{i + 1}{ext}"
+                        dest_path = os.path.join(participant_folder, new_filename)
+                        shutil.copy2(row.template_path, dest_path)
+                        if ext.lower() == '.pdf':
+                            generated_pdf_paths.append(dest_path)
                 
-                result_msg = f"Generated {success_count} of {len(participant_ids)} folders successfully!"
-                if failed:
-                    result_msg += f"\n\nFailed:\n" + "\n".join(failed)
-                QMessageBox.information(self, "Batch Generation Complete", result_msg)
-            else:
-                participant_id = self.nameset.text().strip()
-                if not participant_id:
-                    return self.error_window("Please enter a participant ID!")
-                self._generate_single(participant_id)
-                QMessageBox.information(
-                    self, "Success",
-                    f"Participant folder created successfully!\n{os.path.join(self.target_path, participant_id)}"
-                )
+                if generated_pdf_paths:
+                    all_generated_pdf_paths[pid] = generated_pdf_paths
+
+            if all_generated_pdf_paths:
+                self.field_mapping = self._ensure_or_create_field_mapping()
+                apply_prefill, batch_prefill_map = self.showBatchGenerationPrefillDialog(all_generated_pdf_paths)
+                if not apply_prefill:
+                    return
+                for pdf_path, field_values in batch_prefill_map.items():
+                    if field_values:
+                        self._write_pdf_form_fields(pdf_path, field_values)
+
+            QMessageBox.information(
+                self, "Success",
+                f"Successfully generated folders and questionnaires for {len(participant_ids)} participant(s)!"
+            )
         except Exception as e:
-            self.error_window(f"Error generating folder: {str(e)}")
-    
-    def _generate_single(self, participant_id: str) -> None:
-        if not self.target_path:
-            raise ValueError("Please select a target folder!")
-        if not self.questionnaire_rows:
-            raise ValueError("Please configure questionnaires!")
-        
-        participant_folder = os.path.join(self.target_path, participant_id)
-        if os.path.exists(participant_folder):
-            shutil.rmtree(participant_folder)
-        os.makedirs(participant_folder)
-
-        generated_pdf_paths: List[str] = []
-        for row in self.questionnaire_rows:
-            if not row.template_path:
-                continue
-            
-            survey_name = row.name_edit.text().strip() or f"survey_{row.index + 1}"
-            try:
-                copy_count = int(row.count_edit.text())
-            except ValueError:
-                copy_count = 1
-            
-            _, ext = os.path.splitext(os.path.basename(row.template_path))
-            for i in range(copy_count):
-                new_filename = f"{participant_id}_{survey_name}{ext}" if copy_count == 1 else f"{participant_id}_{survey_name}{i + 1}{ext}"
-                dest_path = os.path.join(participant_folder, new_filename)
-                shutil.copy2(row.template_path, dest_path)
-                if ext.lower() == '.pdf':
-                    generated_pdf_paths.append(dest_path)
-
-        if generated_pdf_paths:
-            self.field_mapping = self._ensure_or_create_field_mapping()
-            apply_prefill, prefill_map = self.showGenerationPrefillDialog(participant_id, generated_pdf_paths)
-            if not apply_prefill:
-                return
-            for pdf_path, field_values in prefill_map.items():
-                if field_values:
-                    self._write_pdf_form_fields(pdf_path, field_values)
+            self.error_window(f"Error generating folder(s): {str(e)}")
 
     def _write_pdf_form_fields(self, pdf_path: str, field_values: Dict[str, Any]) -> None:
         reader = PdfReader(pdf_path)
@@ -632,98 +649,106 @@ class MainWindow(QMainWindow):
                 defaults[field_name] = participant_id
         return defaults
 
-    def showGenerationPrefillDialog(self, participant_id: str, generated_pdf_paths: List[str]) -> tuple[bool, Dict[str, Dict[str, Any]]]:
+    def showBatchGenerationPrefillDialog(self, all_generated_pdf_paths: Dict[str, List[str]]) -> tuple[bool, Dict[str, Dict[str, Any]]]:
         dialog = QDialog(self)
-        dialog.setWindowTitle("Preview Data Extraction")
+        dialog.setWindowTitle("Consolidated Batch Preview & Generation")
         dialog.setModal(True)
-        dialog.resize(800, 600)
+        dialog.resize(900, 650)
 
         layout = QVBoxLayout()
-        label = QLabel(f"Preview data for participant: {participant_id}")
+        label = QLabel(f"Preview & Edit Data for {len(all_generated_pdf_paths)} Participant(s)")
         label.setStyleSheet("font-weight: bold; font-size: 14px;")
         layout.addWidget(label)
 
         table = QTableWidget()
-        table.setColumnCount(3)
-        table.setHorizontalHeaderLabels(["Field", "Name", "Data"])
+        table.setColumnCount(4)
+        table.setHorizontalHeaderLabels(["Participant ID", "File", "Field", "Data"])
 
-        rows: List[tuple[str, str, str]] = []
-        file_to_path: Dict[str, str] = {os.path.basename(p): p for p in generated_pdf_paths}
+        rows: List[tuple[str, str, str, str, str]] = []
+        file_to_path: Dict[str, str] = {}
         file_to_extracted_fields: Dict[str, Dict[str, str]] = {}
         
         root_order = self.get_configured_root_order()
-        sorted_pdf_paths = sorted(
-            generated_pdf_paths,
-            key=lambda p: (
-                root_order.index(self._get_root_survey_name(os.path.splitext(os.path.basename(p))[0].replace(f'{participant_id}_', '', 1)))
-                if self._get_root_survey_name(os.path.splitext(os.path.basename(p))[0].replace(f'{participant_id}_', '', 1)) in root_order
-                else 9999,
-                natural_sort_key(os.path.basename(p))
+
+        for participant_id, pdf_paths in all_generated_pdf_paths.items():
+            sorted_pdf_paths = sorted(
+                pdf_paths,
+                key=lambda p: (
+                    root_order.index(self._get_root_survey_name(os.path.splitext(os.path.basename(p))[0].replace(f'{participant_id}_', '', 1)))
+                    if self._get_root_survey_name(os.path.splitext(os.path.basename(p))[0].replace(f'{participant_id}_', '', 1)) in root_order
+                    else 9999,
+                    natural_sort_key(os.path.basename(p))
+                )
             )
-        )
 
-        for pdf_path in sorted_pdf_paths:
-            file_label = os.path.basename(pdf_path)
-            survey_type = os.path.splitext(file_label)[0].replace(f'{participant_id}_', '', 1)
-            extracted_fields = self._extract_pdf_form_fields(pdf_path)
-            if not extracted_fields:
-                continue
-            defaults = self._build_prefill_defaults(participant_id, extracted_fields)
-            file_to_extracted_fields[file_label] = extracted_fields
+            for pdf_path in sorted_pdf_paths:
+                file_label = os.path.basename(pdf_path)
+                file_to_path[f"{participant_id}::{file_label}"] = pdf_path
+                survey_type = os.path.splitext(file_label)[0].replace(f'{participant_id}_', '', 1)
+                extracted_fields = self._extract_pdf_form_fields(pdf_path)
+                if not extracted_fields:
+                    continue
+                defaults = self._build_prefill_defaults(participant_id, extracted_fields)
+                file_to_extracted_fields[f"{participant_id}::{file_label}"] = extracted_fields
 
-            preferred_fields: Dict[str, str] = {}
-            for k, v in defaults.items():
-                if k.endswith('_n'):
-                    base = k[:-2]
-                    if base not in defaults:
-                        preferred_fields[base] = str(v)
-                else:
-                    preferred_fields[k] = str(v)
+                preferred_fields: Dict[str, str] = {}
+                for k, v in defaults.items():
+                    if k.endswith('_n'):
+                        base = k[:-2]
+                        if base not in defaults:
+                            preferred_fields[base] = str(v)
+                    else:
+                        preferred_fields[k] = str(v)
 
-            check_matrix_groups: Dict[str, Dict[str, str]] = {}
-            text_fields: Dict[str, str] = {}
-            
-            for field_name in sorted(preferred_fields.keys(), key=natural_sort_key):
-                val = preferred_fields[field_name]
-                m = CANONICAL_PATTERN.match(field_name)
-                if m:
-                    kind, group_x, opt_n = m.group(1).capitalize(), m.group(2), m.group(3)
-                    if kind == 'Check' and opt_n is not None:
-                        base_name = f"Check{group_x}"
-                        check_matrix_groups.setdefault(base_name, {})[opt_n] = val
+                check_matrix_groups: Dict[str, Dict[str, str]] = {}
+                text_fields: Dict[str, str] = {}
+                
+                for field_name in sorted(preferred_fields.keys(), key=natural_sort_key):
+                    val = preferred_fields[field_name]
+                    m = CANONICAL_PATTERN.match(field_name)
+                    if m:
+                        kind, group_x, opt_n = m.group(1).capitalize(), m.group(2), m.group(3)
+                        if kind == 'Check' and opt_n is not None:
+                            base_name = f"Check{group_x}"
+                            check_matrix_groups.setdefault(base_name, {})[opt_n] = val
+                        else:
+                            text_fields[field_name] = val
                     else:
                         text_fields[field_name] = val
-                else:
-                    text_fields[field_name] = val
 
-            for f_name, f_val in sorted(text_fields.items(), key=lambda it: natural_sort_key(it[0])):
-                system_key = f"{survey_type}_{f_name}"
-                display_name = self.field_mapping.get(system_key, self.field_mapping.get(f_name, f_name))
-                rows.append((f"{file_label} :: {f_name}", display_name, f_val))
+                for f_name, f_val in sorted(text_fields.items(), key=lambda it: natural_sort_key(it[0])):
+                    system_key = f"{survey_type}_{f_name}"
+                    display_name = self.field_mapping.get(system_key, self.field_mapping.get(f_name, f_name))
+                    rows.append((participant_id, file_label, f_name, display_name, f_val))
 
-            for base_name, options in sorted(check_matrix_groups.items(), key=lambda it: natural_sort_key(it[0])):
-                system_key = f"{survey_type}_{base_name}"
-                display_name = self.field_mapping.get(system_key, self.field_mapping.get(base_name, base_name))
-                checked_opt = next((opt for opt, cval in sorted(options.items(), key=lambda it: natural_sort_key(it[0])) if cval == '1'), '')
-                rows.append((f"{file_label} :: {base_name}", display_name, checked_opt))
+                for base_name, options in sorted(check_matrix_groups.items(), key=lambda it: natural_sort_key(it[0])):
+                    system_key = f"{survey_type}_{base_name}"
+                    display_name = self.field_mapping.get(system_key, self.field_mapping.get(base_name, base_name))
+                    checked_opt = next((opt for opt, cval in sorted(options.items(), key=lambda it: natural_sort_key(it[0])) if cval == '1'), '')
+                    rows.append((participant_id, file_label, base_name, display_name, checked_opt))
 
         table.setRowCount(len(rows))
-        for idx, (combined_field, display_name, value) in enumerate(rows):
-            field_item = QTableWidgetItem(combined_field)
-            field_item.setFlags(field_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        for idx, (pid, file_label, f_name, display_name, value) in enumerate(rows):
+            pid_item = QTableWidgetItem(pid)
+            pid_item.setFlags(pid_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            file_item = QTableWidgetItem(file_label)
+            file_item.setFlags(file_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             name_item = QTableWidgetItem(display_name)
             name_item.setFlags(name_item.flags() | Qt.ItemFlag.ItemIsEditable)
-            table.setItem(idx, 0, field_item)
-            table.setItem(idx, 1, name_item)
-            table.setItem(idx, 2, QTableWidgetItem(value))
+            
+            table.setItem(idx, 0, pid_item)
+            table.setItem(idx, 1, file_item)
+            table.setItem(idx, 2, name_item)
+            table.setItem(idx, 3, QTableWidgetItem(value))
 
         table.horizontalHeader().setStretchLastSection(True)
         table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         layout.addWidget(table)
 
-        button_layout = QVBoxLayout()
-        confirm_btn = QPushButton("Confirm and Generate")
+        button_layout = QHBoxLayout()
+        confirm_btn = QPushButton("Confirm and Generate All")
         cancel_btn = QPushButton("Cancel")
         button_layout.addWidget(confirm_btn)
         button_layout.addWidget(cancel_btn)
@@ -733,39 +758,42 @@ class MainWindow(QMainWindow):
         result: Dict[str, Any] = {"action": "cancel", "values": {}}
 
         def confirm_and_close() -> None:
-            prefill_values: Dict[str, Dict[str, Any]] = {p: {} for p in generated_pdf_paths}
+            prefill_values: Dict[str, Dict[str, Any]] = {}
+            for paths in all_generated_pdf_paths.values():
+                for p in paths:
+                    prefill_values[p] = {}
             
             for row_index in range(table.rowCount()):
-                combined_item = table.item(row_index, 0)
-                name_item = table.item(row_index, 1)
-                value_item = table.item(row_index, 2)
-                if combined_item is None or name_item is None:
+                pid_item = table.item(row_index, 0)
+                file_item = table.item(row_index, 1)
+                name_item = table.item(row_index, 2)
+                value_item = table.item(row_index, 3)
+                if pid_item is None or file_item is None or name_item is None:
                     continue
-                combined = combined_item.text()
-                if " :: " not in combined:
-                    continue
-                file_name, field_name = combined.split(" :: ", 1)
-                pdf_path = file_to_path.get(file_name)
+                pid = pid_item.text()
+                file_name = file_item.text()
+                pdf_path = file_to_path.get(f"{pid}::{file_name}")
+                underlying_field_name = rows[row_index][2]
                 val = value_item.text().strip() if value_item else ""
                 
-                survey_type = os.path.splitext(file_name)[0].replace(f'{participant_id}_', '', 1)
+                survey_type = os.path.splitext(file_name)[0].replace(f'{pid}_', '', 1)
                 new_name = name_item.text().strip()
                 if new_name:
-                    self.field_mapping[f"{survey_type}_{field_name}"] = new_name
+                    self.field_mapping[f"{survey_type}_{underlying_field_name}"] = new_name
 
                 if not pdf_path:
                     continue
 
-                if field_name.startswith('Check') and '_' not in field_name:
-                    base_name = field_name
-                    raw_fields = file_to_extracted_fields.get(file_name, {})
+                if underlying_field_name.startswith('Check') and '_' not in underlying_field_name:
+                    base_name = underlying_field_name
+                    raw_fields = file_to_extracted_fields.get(f"{pid}::{file_name}", {})
                     for raw_f in raw_fields:
                         m = CANONICAL_PATTERN.match(raw_f)
                         if m and f"Check{m.group(2)}" == base_name and m.group(3) is not None:
                             col_opt = m.group(3)
                             prefill_values[pdf_path][raw_f] = '1' if col_opt == val else '0'
                 else:
-                    prefill_values[pdf_path][field_name] = val
+                    prefill_values[pdf_path][underlying_field_name] = val
 
             if self.active_config_name:
                 self._save_mapping_to_config(self.active_config_name, self.field_mapping)
@@ -783,7 +811,7 @@ class MainWindow(QMainWindow):
         raise ValueError("Generation cancelled by user")
 
     def _prepare_data_for_extraction(self, participant_id: str) -> Dict[str, Dict[str, Any]]:
-        """Extract data segregated by root sheet name, preserving root sequence and numerical order."""
+        """Extract data segregated by root sheet name, preserving root sequence and numerical order[cite: 1]."""
         normalized_source = os.path.normpath(self.source_path)
         participant_folder = self.source_path if normalized_source.endswith(participant_id) else os.path.join(self.source_path, participant_id)
         
@@ -846,140 +874,124 @@ class MainWindow(QMainWindow):
 
         return sheet_data
 
-    def _readout_single(self, participant_id: str, sheet_data: Optional[Dict[str, Dict[str, Any]]] = None) -> None:
-        """Route each root PDF's extracted data to its own dedicated worksheet with smart row placement and duplicate/overwrite detection."""
-        if sheet_data is None:
-            sheet_data = self._prepare_data_for_extraction(participant_id)
+    def _readout_batch(self, participant_ids: List[str]) -> None:
+        """Route all participants' extracted data into masterfile sheets in a single session without repeated file openings."""
+        if not self.excel_path:
+            raise ValueError("Please select a masterfile! (Expand 'Configuration Settings' to select masterfile)")
 
         file_ext = self.excel_path.lower().split('.')[-1]
         root_order = self.get_configured_root_order()
 
-        ordered_sheet_names = sorted(
-            sheet_data.keys(),
-            key=lambda s: (root_order.index(s) if s in root_order else 9999, natural_sort_key(s))
-        )
+        all_participants_sheet_data: Dict[str, Dict[str, Dict[str, Any]]] = {}
+        for pid in participant_ids:
+            all_participants_sheet_data[pid] = self._prepare_data_for_extraction(pid)
 
         if file_ext in ['xls', 'xlsx']:
             wb: xlw.Book = xlw.Book(self.excel_path)
             try:
-                for sheet_name in ordered_sheet_names:
-                    raw_data = sheet_data[sheet_name]
-                    export_data: Dict[str, Any] = {'participant_id': participant_id}
-                    
-                    sorted_field_keys = sorted(
-                        [k for k in raw_data.keys() if k != 'participant_id'],
-                        key=natural_sort_key
+                for pid in participant_ids:
+                    sheet_data = all_participants_sheet_data.get(pid, {})
+                    ordered_sheet_names = sorted(
+                        sheet_data.keys(),
+                        key=lambda s: (root_order.index(s) if s in root_order else 9999, natural_sort_key(s))
                     )
 
-                    for key in sorted_field_keys:
-                        value = raw_data[key]
-                        col_name = self.field_mapping.get(key)
-                        if not col_name:
-                            col_name = self.field_mapping.get(f"{sheet_name}_{key}")
-                        if not col_name:
-                            for map_k, map_v in self.field_mapping.items():
-                                if key.endswith(f"_{map_k}") or map_k.endswith(f"_{key}"):
-                                    col_name = map_v
-                                    break
-                        export_data[col_name or key] = value
-
-                    sheet_names = [cast(str, s.name) for s in wb.sheets]
-                    
-                    # IF-ELSE block for existing vs new sheet handling
-                    if sheet_name in sheet_names:
-                        sheet: xlw.Sheet = cast(xlw.Sheet, wb.sheets[sheet_name])
+                    for sheet_name in ordered_sheet_names:
+                        raw_data = sheet_data[sheet_name]
+                        export_data: Dict[str, Any] = {'participant_id': pid}
                         
-                        first_row = sheet.range('1:1').value
-                        header_map: Dict[str, int] = {}
-                        if first_row:
-                            row_vals = first_row if isinstance(first_row, list) else [first_row]
-                            for c_idx, val in enumerate(row_vals, start=1):
-                                if val is not None and str(val).strip():
-                                    header_map[str(val).strip()] = c_idx
+                        sorted_field_keys = sorted(
+                            [k for k in raw_data.keys() if k != 'participant_id'],
+                            key=natural_sort_key
+                        )
 
-                        # Strict scientific schema validation
-                        existing_cols = set(header_map.keys())
-                        incoming_cols = set(export_data.keys())
+                        for key in sorted_field_keys:
+                            value = raw_data[key]
+                            col_name = self.field_mapping.get(key)
+                            if not col_name:
+                                col_name = self.field_mapping.get(f"{sheet_name}_{key}")
+                            if not col_name:
+                                for map_k, map_v in self.field_mapping.items():
+                                    if key.endswith(f"_{map_k}") or map_k.endswith(f"_{key}"):
+                                        col_name = map_v
+                                        break
+                            export_data[col_name or key] = value
+
+                        sheet_names = [cast(str, s.name) for s in wb.sheets]
                         
-                        if existing_cols != incoming_cols:
-                            missing = existing_cols - incoming_cols
-                            extra = incoming_cols - existing_cols
-                            msg = (f"Schema Mismatch Detected in Sheet '{sheet_name}' for participant '{participant_id}'!\n\n"
-                                   f"The columns in the masterfile do not match the incoming data structure.\n")
-                            if missing:
-                                msg += f"\nMissing from incoming data: {list(missing)}"
-                            if extra:
-                                msg += f"\nUnexpected/Extra in incoming data: {list(extra)}"
-                            msg += "\n\nDo you want to proceed anyway (post-hoc adaptation)?"
+                        if sheet_name in sheet_names:
+                            sheet: xlw.Sheet = cast(xlw.Sheet, wb.sheets[sheet_name])
                             
-                            reply = QMessageBox.question(
-                                self, "Schema Mismatch Warning", msg,
-                                cast(QMessageBox.StandardButton, QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No),
-                                QMessageBox.StandardButton.No
-                            )
-                            if reply == QMessageBox.StandardButton.No:
-                                raise ValueError(f"Extraction aborted due to schema mismatch in sheet '{sheet_name}'.")
+                            first_row = sheet.range('1:1').value
+                            header_map: Dict[str, int] = {}
+                            if first_row:
+                                row_vals = first_row if isinstance(first_row, list) else [first_row]
+                                for c_idx, val in enumerate(row_vals, start=1):
+                                    if val is not None and str(val).strip():
+                                        header_map[str(val).strip()] = c_idx
 
-                        # Ensure any newly acknowledged columns are safely added to header_map
-                        next_col = max(header_map.values(), default=0) + 1
-                        for key in export_data.keys():
-                            if key not in header_map:
-                                sheet.range(1, next_col).value = key
-                                header_map[key] = next_col
-                                next_col += 1
+                            existing_cols = set(header_map.keys())
+                            incoming_cols = set(export_data.keys())
+                            
+                            if existing_cols != incoming_cols:
+                                missing = existing_cols - incoming_cols
+                                extra = incoming_cols - existing_cols
+                                msg = (f"Schema Mismatch Detected in Sheet '{sheet_name}' for participant '{pid}'!\n")
+                                if missing:
+                                    msg += f"\nMissing: {list(missing)}"
+                                if extra:
+                                    msg += f"\nExtra: {list(extra)}"
+                                msg += "\n\nProceed anyway?"
+                                
+                                if QMessageBox.question(self, "Schema Mismatch Warning", msg,
+                                                        cast(QMessageBox.StandardButton, QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No),
+                                                        QMessageBox.StandardButton.No) == QMessageBox.StandardButton.No:
+                                    raise ValueError(f"Extraction aborted for '{pid}' due to schema mismatch in '{sheet_name}'.")
 
-                        # Check if participant_id already exists in Column A (Row 2 onwards) to allow safe overwriting/re-establishing
-                        target_row = None
-                        r_idx = 2
-                        while True:
-                            val = sheet.range(f'A{r_idx}').value
-                            if val is None:
-                                break
-                            if str(val).strip() == str(participant_id):
-                                target_row = r_idx
-                                break
-                            r_idx += 1
+                            next_col = max(header_map.values(), default=0) + 1
+                            for key in export_data.keys():
+                                if key not in header_map:
+                                    sheet.range(1, next_col).value = key
+                                    header_map[key] = next_col
+                                    next_col += 1
 
-                        if target_row is not None:
-                            # Prompt user if they want to overwrite the existing broken/mistaken entry record
-                            ov_reply = QMessageBox.question(
-                                self, "Existing Participant Record Found",
-                                f"Participant ID '{participant_id}' already exists at row {target_row} in sheet '{sheet_name}'.\n\n"
-                                f"Do you want to overwrite this existing entry (e.g. to re-establish a corrected record)?",
-                                cast(QMessageBox.StandardButton, QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No),
-                                QMessageBox.StandardButton.No
-                            )
-                            if ov_reply == QMessageBox.StandardButton.Yes:
+                            target_row = None
+                            r_idx = 2
+                            while True:
+                                val = sheet.range(f'A{r_idx}').value
+                                if val is None:
+                                    break
+                                if str(val).strip() == str(pid):
+                                    target_row = r_idx
+                                    break
+                                r_idx += 1
+
+                            if target_row is not None:
                                 next_row = target_row
                             else:
-                                raise ValueError(f"Extraction cancelled: Participant '{participant_id}' already exists at row {target_row}.")
+                                next_row = 2
+                                while sheet.range(f'A{next_row}').value is not None:
+                                    next_row += 1
+
                         else:
-                            # Standard next available row (x + 1 where headers occupy row 1)
+                            if len(wb.sheets) == 1 and wb.sheets[0].range('A1').value is None:
+                                sheet = cast(xlw.Sheet, wb.sheets[0])
+                                sheet.name = sheet_name
+                            else:
+                                sheet = cast(xlw.Sheet, wb.sheets.add(name=sheet_name, after=wb.sheets[-1]))
+
+                            headers = list(export_data.keys())
+                            header_map = {}
+                            for idx, header in enumerate(headers, start=1):
+                                sheet.range(1, idx).value = header
+                                header_map[header] = idx
+
                             next_row = 2
-                            while sheet.range(f'A{next_row}').value is not None:
-                                next_row += 1
 
-                    else:
-                        # First-entry case: Sheet does not exist yet
-                        if len(wb.sheets) == 1 and wb.sheets[0].range('A1').value is None:
-                            sheet = cast(xlw.Sheet, wb.sheets[0])
-                            sheet.name = sheet_name
-                        else:
-                            sheet = cast(xlw.Sheet, wb.sheets.add(name=sheet_name, after=wb.sheets[-1]))
-
-                        headers = list(export_data.keys())
-                        header_map = {}
-                        for idx, header in enumerate(headers, start=1):
-                            sheet.range(1, idx).value = header
-                            header_map[header] = idx
-
-                        next_row = 2
-
-                    # Write data values into target/next row
-                    for key, val in export_data.items():
-                        col_idx = header_map.get(key)
-                        if col_idx:
-                            sheet.range(next_row, col_idx).value = val
+                        for key, val in export_data.items():
+                            col_idx = header_map.get(key)
+                            if col_idx:
+                                sheet.range(next_row, col_idx).value = val
 
                 cast(xlw.Book, wb).save()
             except Exception:
@@ -990,126 +1002,84 @@ class MainWindow(QMainWindow):
             base_dir = os.path.dirname(self.excel_path)
             base_name = os.path.splitext(os.path.basename(self.excel_path))[0]
             
-            for sheet_name in ordered_sheet_names:
-                raw_data = sheet_data[sheet_name]
-                target_csv = os.path.join(base_dir, f"{base_name}_{sheet_name}.csv")
-                file_exists = os.path.exists(target_csv) and os.path.getsize(target_csv) > 0
-
-                export_data = {'participant_id': participant_id}
-                sorted_field_keys = sorted(
-                    [k for k in raw_data.keys() if k != 'participant_id'],
-                    key=natural_sort_key
+            for pid in participant_ids:
+                sheet_data = all_participants_sheet_data.get(pid, {})
+                ordered_sheet_names = sorted(
+                    sheet_data.keys(),
+                    key=lambda s: (root_order.index(s) if s in root_order else 9999, natural_sort_key(s))
                 )
-                for k in sorted_field_keys:
-                    mapped_k = self.field_mapping.get(k, self.field_mapping.get(f"{sheet_name}_{k}", k))
-                    export_data[mapped_k] = raw_data[k]
 
-                existing_headers: List[str] = []
-                existing_rows: List[Dict[str, Any]] = []
-                if file_exists:
-                    with open(target_csv, 'r', newline='', encoding='utf-8') as f:
-                        reader = csv.DictReader(f)
-                        existing_headers = list(reader.fieldnames) if reader.fieldnames else []
-                        existing_rows = list(reader)
+                for sheet_name in ordered_sheet_names:
+                    raw_data = sheet_data[sheet_name]
+                    target_csv = os.path.join(base_dir, f"{base_name}_{sheet_name}.csv")
+                    file_exists = os.path.exists(target_csv) and os.path.getsize(target_csv) > 0
 
-                    # Strict schema validation for CSV
-                    existing_cols = set(existing_headers)
-                    incoming_cols = set(export_data.keys())
-                    if existing_cols != incoming_cols:
-                        missing = existing_cols - incoming_cols
-                        extra = incoming_cols - existing_cols
-                        msg = (f"Schema Mismatch Detected in CSV '{sheet_name}' for participant '{participant_id}'!\n\n")
-                        if missing:
-                            msg += f"Missing from incoming data: {list(missing)}\n"
-                        if extra:
-                            msg += f"Unexpected/Extra in incoming data: {list(extra)}\n"
-                        msg += "\nDo you want to proceed anyway?"
-                        
-                        if QMessageBox.question(self, "Schema Mismatch Warning", msg,
-                                                cast(QMessageBox.StandardButton, QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No),
-                                                QMessageBox.StandardButton.No) == QMessageBox.StandardButton.No:
-                            raise ValueError(f"Extraction aborted due to schema mismatch in CSV '{sheet_name}'.")
-
-                # Handle duplicate/overwrite check for CSV rows
-                existing_index = -1
-                for idx, row in enumerate(existing_rows):
-                    if row.get('participant_id') == participant_id:
-                        existing_index = idx
-                        break
-
-                if existing_index != -1:
-                    ov_reply = QMessageBox.question(
-                        self, "Existing Participant Record Found",
-                        f"Participant ID '{participant_id}' already exists in CSV '{sheet_name}'.\n\n"
-                        f"Do you want to overwrite this existing entry?",
-                        cast(QMessageBox.StandardButton, QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No),
-                        QMessageBox.StandardButton.No
+                    export_data = {'participant_id': pid}
+                    sorted_field_keys = sorted(
+                        [k for k in raw_data.keys() if k != 'participant_id'],
+                        key=natural_sort_key
                     )
-                    if ov_reply == QMessageBox.StandardButton.Yes:
+                    for k in sorted_field_keys:
+                        mapped_k = self.field_mapping.get(k, self.field_mapping.get(f"{sheet_name}_{k}", k))
+                        export_data[mapped_k] = raw_data[k]
+
+                    existing_headers: List[str] = []
+                    existing_rows: List[Dict[str, Any]] = []
+                    if file_exists:
+                        with open(target_csv, 'r', newline='', encoding='utf-8') as f:
+                            reader = csv.DictReader(f)
+                            existing_headers = list(reader.fieldnames) if reader.fieldnames else []
+                            existing_rows = list(reader)
+
+                    existing_index = -1
+                    for idx, row in enumerate(existing_rows):
+                        if row.get('participant_id') == pid:
+                            existing_index = idx
+                            break
+
+                    if existing_index != -1:
                         existing_rows[existing_index] = export_data
                     else:
-                        raise ValueError(f"Extraction cancelled: Participant '{participant_id}' already exists in CSV '{sheet_name}'.")
-                else:
-                    existing_rows.append(export_data)
+                        existing_rows.append(export_data)
 
-                new_headers = [k for k in export_data.keys() if k not in existing_headers]
-                all_headers = existing_headers + new_headers if existing_headers else list(export_data.keys())
+                    new_headers = [k for k in export_data.keys() if k not in existing_headers]
+                    all_headers = existing_headers + new_headers if existing_headers else list(export_data.keys())
 
-                with open(target_csv, 'w', newline='', encoding='utf-8') as f:
-                    writer = csv.DictWriter(f, fieldnames=all_headers)
-                    writer.writeheader()
-                    writer.writerows(existing_rows)
+                    with open(target_csv, 'w', newline='', encoding='utf-8') as f:
+                        writer = csv.DictWriter(f, fieldnames=all_headers)
+                        writer.writeheader()
+                        writer.writerows(existing_rows)
         else:
             raise ValueError(f"Unsupported masterfile format: {file_ext}")
 
     def extract_data(self) -> None:
         if not self.excel_path:
-            return self.error_window("Please select a masterfile!")
+            return self.error_window("Please select a masterfile! (Expand 'Configuration Settings' to select masterfile)")
+        if not self.source_path:
+            return self.error_window("Please select a source folder! (Expand 'Configuration Settings' to select source folder)")
 
         self.field_mapping = self._load_field_mapping_for_extraction()
-        
-        if self.batch_mode_extract.isChecked():
-            participant_ids = self.parseParticipantIDs(self.batch_text_extract.toPlainText())
-            if not participant_ids:
-                return self.error_window("Please enter at least one participant ID!")
-            
-            success_count = 0
-            failed: List[str] = []
-            
-            for pid in participant_ids:
-                try:
-                    self._readout_single(pid)
-                    success_count += 1
-                except Exception as e:
-                    failed.append(f"{pid}: {str(e)}")
-            
-            msg = f"Extracted {success_count} of {len(participant_ids)} participants successfully!"
-            if failed:
-                msg += f"\n\nFailed/Skipped:\n" + "\n".join(failed)
-            QMessageBox.information(self, "Batch Extraction Complete", msg)
-        else:
-            participant_id = self.nameset.text().strip()
-            if not participant_id:
-                return self.error_window("Please enter a participant ID!")
-            self.readout()
-    
-    def readout(self) -> None:
+        participant_ids = self.get_active_participant_ids()
+        if not participant_ids:
+            return self.error_window("Please enter at least one participant ID!")
+
         try:
-            self.field_mapping = self._load_field_mapping_for_extraction()
-            participant_id = self.nameset.text().strip()
-            sheet_data = self._prepare_data_for_extraction(participant_id)
-            
-            confirmed, edited_sheet_data = self.showPreviewDialog(participant_id, sheet_data)
-            if not confirmed:
-                return
-            
-            self._readout_single(participant_id, edited_sheet_data)
-            QMessageBox.information(self, "Success", f"Data extracted successfully into sheets for {participant_id}!")
+            if len(participant_ids) > 1 or self.batch_mode_global.isChecked():
+                self._readout_batch(participant_ids)
+                QMessageBox.information(self, "Batch Extraction Complete", f"Successfully extracted {len(participant_ids)} participant(s) into masterfile!")
+            else:
+                participant_id = participant_ids[0]
+                sheet_data = self._prepare_data_for_extraction(participant_id)
+                confirmed, edited_sheet_data = self.showPreviewDialog(participant_id, sheet_data)
+                if not confirmed:
+                    return
+                self._readout_batch([participant_id])
+                QMessageBox.information(self, "Success", f"Data extracted successfully into sheets for {participant_id}!")
         except Exception as e:
             self.error_window(f"Error extracting data: {str(e)}")
 
     def showPreviewDialog(self, participant_id: str, sheet_data: Dict[str, Dict[str, Any]]) -> Tuple[bool, Dict[str, Dict[str, Any]]]:
-        """4-column preview ordered first by root-PDF sequence, then numerically."""
+        """4-column preview ordered first by root-PDF sequence, then numerically[cite: 1]."""
         dialog = QDialog(self)
         dialog.setWindowTitle("Preview Data Extraction")
         dialog.setModal(True)
@@ -1161,7 +1131,7 @@ class MainWindow(QMainWindow):
         table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         layout.addWidget(table)
         
-        btn_layout = QVBoxLayout()
+        btn_layout = QHBoxLayout()
         c_btn = QPushButton("Confirm and Extract")
         can_btn = QPushButton("Cancel")
         btn_layout.addWidget(c_btn)
@@ -1196,7 +1166,6 @@ class MainWindow(QMainWindow):
         return result[0], edited_output if result[0] else sheet_data
 
     def _get_expected_system_fields(self) -> set[str]:
-        """Auto-generate expected field mapping with fully qualified keys: {survey_instance}_{canonical_field}."""
         expected: set[str] = set()
 
         for row in self.questionnaire_rows:
@@ -1281,7 +1250,6 @@ class MainWindow(QMainWindow):
             cfg.write(f)
 
     def editFieldMappingFromExtraction(self) -> None:
-        """Edit and save the column name remapping for the active configuration."""
         expected = self._get_expected_system_fields()
         root_order = self.get_configured_root_order()
         
@@ -1368,7 +1336,7 @@ class MainWindow(QMainWindow):
                 cfg.write(f)
 
     def ConfigGen(self, name: str) -> None:
-        """Create a complete snapshot including folders, questionnaires, and name remapping."""
+        """Create a complete snapshot including folders, questionnaires, and name remapping[cite: 1]."""
         if not name:
             return self.error_window("No name provided!")
         cfg = ConfigParser()
@@ -1435,13 +1403,10 @@ class MainWindow(QMainWindow):
         else:
             self.error_window("Manual not found:\n" + manual_path)
 
-    def toggleBatchModeGeneration(self, checked: bool) -> None:
+    def toggleBatchModeGlobal(self, checked: bool) -> None:
         self.nameset.setVisible(not checked)
-        self.batch_text_gen.setVisible(checked)
-
-    def toggleBatchModeExtraction(self, checked: bool) -> None:
-        self.nameset.setVisible(not checked)
-        self.batch_text_extract.setVisible(checked)
+        self.batch_text_global.setVisible(checked)
+        QTimer.singleShot(10, self.adjustSize)
 
     def importParticipantList(self, target_text_edit: QTextEdit) -> None:
         path = QFileDialog.getOpenFileName(self, "Import Participant List", "", "Text/CSV (*.txt *.csv);;All (*.*)")[0]
@@ -1456,92 +1421,8 @@ class MainWindow(QMainWindow):
         unique = list(dict.fromkeys(pids))
         target_text_edit.setPlainText('\n'.join(unique))
 
-    def saveTemplateBundle(self) -> None:
-        name, ok = QInputDialog.getText(self, "Save Bundle", "Bundle name:")
-        if not ok or not name.strip():
-            return
-        d = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'template_bundles')
-        os.makedirs(d, exist_ok=True)
-        data = [{'name': r.name_edit.text(), 'path': r.template_path, 'count': r.count_edit.text()} for r in self.questionnaire_rows]
-        with open(os.path.join(d, f"{name.strip()}.json"), 'w', encoding='utf-8') as f:
-            json.dump({'name': name.strip(), 'items': data}, f, indent=2)
-
-    def loadTemplateBundle(self) -> None:
-        d = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'template_bundles')
-        if not os.path.exists(d):
-            return self.error_window("No bundles found!")
-        files = [f.replace('.json', '') for f in os.listdir(d) if f.endswith('.json')]
-        if not files:
-            return self.error_window("No bundles found!")
-        choice, ok = QInputDialog.getItem(self, "Load Bundle", "Select bundle:", files, 0, False)
-        if not ok:
-            return
-        with open(os.path.join(d, f"{choice}.json"), 'r', encoding='utf-8') as f:
-            bundle = json.load(f)
-        items = bundle.get('items', [])
-        self.quest_count_edit.setText(str(len(items)))
-        self.create_questionnaire_rows()
-        for idx, it in enumerate(items):
-            if idx < len(self.questionnaire_rows):
-                self.questionnaire_rows[idx].name_edit.setText(it.get('name', ''))
-                self.questionnaire_rows[idx].template_path = it.get('path', '')
-                self.questionnaire_rows[idx].path_display.setText(it.get('path', ''))
-                self.questionnaire_rows[idx].count_edit.setText(it.get('count', '1'))
-
     def parseParticipantIDs(self, text: str) -> List[str]:
         return [line.strip() for line in text.replace(',', '\n').split('\n') if line.strip()]
-
-    def checkDuplicate(self, participant_id: str) -> bool:
-        if not os.path.exists(self.excel_path):
-            return False
-        ext = self.excel_path.lower().split('.')[-1]
-        try:
-            if ext == 'csv':
-                with open(self.excel_path, 'r', encoding='utf-8') as f:
-                    return any(row.get('participant_id') == participant_id for row in csv.DictReader(f))
-            elif ext in ['xls', 'xlsx']:
-                app = xlw.App(visible=False, add_book=False)
-                try:
-                    wb = app.books.open(self.excel_path)
-                    try:
-                        for sheet in wb.sheets:
-                            col_a = sheet.range('A2:A1000').value
-                            ids = [str(x).strip() for x in (col_a if isinstance(col_a, list) else [col_a]) if x is not None]
-                            if participant_id in ids:
-                                return True
-                    finally:
-                        wb.close()
-                finally:
-                    app.quit()
-        except Exception:
-            return False
-        return False
-
-    def generateMissingDataReport(self) -> None:
-        if not self.source_path or not os.path.exists(self.source_path):
-            return self.error_window("Select a valid source folder!")
-        folders = [f for f in os.listdir(self.source_path) if os.path.isdir(os.path.join(self.source_path, f))]
-        report = []
-        root_order = self.get_configured_root_order()
-        for folder in sorted(folders, key=natural_sort_key):
-            try:
-                sheet_data = self._prepare_data_for_extraction(folder)
-                total_fields = sum(len(d) - 1 for d in sheet_data.values())
-                ordered_sheets = sorted(sheet_data.keys(), key=lambda s: (root_order.index(s) if s in root_order else 9999, natural_sort_key(s)))
-                report.append(f"✓ {folder}: Complete ({len(sheet_data)} sheets: {', '.join(ordered_sheets)}, {total_fields} fields)")
-            except Exception as e:
-                report.append(f"✗ {folder}: INCOMPLETE - {str(e)}")
-        
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Missing Data Report")
-        dialog.resize(700, 500)
-        lay = QVBoxLayout()
-        t = QTextEdit()
-        t.setReadOnly(True)
-        t.setText('\n'.join(report))
-        lay.addWidget(t)
-        dialog.setLayout(lay)
-        dialog.exec()
 
     def error_window(self, message: str) -> None:
         QMessageBox.warning(self, "ERROR", message)
