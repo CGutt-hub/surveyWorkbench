@@ -1,4 +1,4 @@
-# Survey Workbench v2.1
+# Survey Workbench
 
 A comprehensive tool for managing participant folders and extracting survey data from PDF questionnaires with automated field mapping and Excel integration.
 
@@ -23,9 +23,7 @@ Survey Workbench is designed to streamline the workflow of:
 
 ## System Requirements
 
-- **OS:** Windows 10/11
 - **Python:** 3.10+ (if running from source)
-- **Excel:** Microsoft Excel (for XLS/XLSX export)
 - **RAM:** 2GB minimum
 - **Storage:** Sufficient space for participant folders and questionnaire PDFs
 
@@ -33,7 +31,7 @@ Survey Workbench is designed to streamline the workflow of:
 
 ### Using the Executable
 
-1. Download `survey_workbench_v2.1.exe` from the `dist/` folder
+1. Download `survey_workbench_v2.2.exe`
 2. Run the executable — no installation needed
 3. The first launch will create a `config.ini` file in the same directory
 
