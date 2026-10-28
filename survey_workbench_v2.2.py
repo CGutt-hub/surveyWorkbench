@@ -27,6 +27,29 @@ from pypdf.generic import NameObject, create_string_object, ArrayObject
 
 # Canonical grammar for all survey presentations
 CANONICAL_PATTERN = re.compile(r'^(Text|Check)(\d+)(?:_(\d+))?(_n)?$', re.IGNORECASE)
+CONFIG_FILENAME = "survey_workbench_config.txt"
+
+
+def get_config_path() -> str:
+    """Return canonical path to survey_workbench_config.txt alongside executable or script."""
+    candidates = [
+        # Alongside script / package source
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), CONFIG_FILENAME),
+        # Alongside compiled binary (sys.executable)
+        os.path.join(os.path.dirname(os.path.abspath(sys.executable)), CONFIG_FILENAME),
+        # Current working directory
+        os.path.join(os.getcwd(), CONFIG_FILENAME)
+    ]
+    for p in candidates:
+        if os.path.exists(p) and os.path.isfile(p):
+            return p
+            
+    # Default to directory containing binary or script
+    if getattr(sys, 'frozen', False) or getattr(sys, '__compiled__', False):
+        base_dir = os.path.dirname(os.path.abspath(sys.executable))
+    else:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base_dir, CONFIG_FILENAME)
 
 
 def natural_sort_key(s: Any) -> List[Any]:
@@ -53,11 +76,8 @@ def resolve_pdf_object(obj: Any) -> Any:
 def find_readme_path() -> Optional[str]:
     """Resolve README.md location across development scripts and compiled binaries."""
     candidates = [
-        # Alongside script / package source
         os.path.join(os.path.dirname(os.path.abspath(__file__)), 'README.md'),
-        # Alongside compiled binary (sys.executable)
         os.path.join(os.path.dirname(os.path.abspath(sys.executable)), 'README.md'),
-        # Current working directory
         os.path.join(os.getcwd(), 'README.md')
     ]
     for p in candidates:
@@ -119,12 +139,12 @@ class SaveConfigWindow(QDialog):
         
         self.configset: QLineEdit = QLineEdit()
         self.configset.setToolTip("Enter a unique profile name (e.g., 'Pilot_Study')")
-        self.configset.setWhatsThis("Enter a profile name. All target/source paths, templates, copy counts, and column field mappings will be saved under this name in config.ini.")
+        self.configset.setWhatsThis(f"Enter a profile name. All target/source paths, templates, copy counts, and column field mappings will be saved under this name in {CONFIG_FILENAME}.")
         layout.addWidget(self.configset, 0, 1)
         
         self.save: QPushButton = QPushButton('Save configuration')
         self.save.setToolTip("Save all settings under the specified name")
-        self.save.setWhatsThis("Click to commit and save the current configuration profile to config.ini.")
+        self.save.setWhatsThis(f"Click to commit and save the current configuration profile to {CONFIG_FILENAME}.")
         layout.addWidget(self.save, 1, 1)
         
         self.setLayout(layout)
@@ -135,7 +155,7 @@ class SaveConfigWindow(QDialog):
         if not self.name:
             return
         self.config = ConfigParser()
-        self.config.read('config.ini')
+        self.config.read(get_config_path(), encoding='utf-8')
         (self.areYouSure if self.config.has_section(self.name) else self.confirm)()
     
     def areYouSure(self) -> None:
@@ -147,7 +167,7 @@ class SaveConfigWindow(QDialog):
         
         if dlg.exec() == QMessageBox.StandardButton.Yes:
             self.config.remove_section(self.name)
-            with open('config.ini', 'w') as f:
+            with open(get_config_path(), 'w', encoding='utf-8') as f:
                 self.config.write(f)
             self.confirm()
         
@@ -196,6 +216,7 @@ class MainWindow(QMainWindow):
         self.questionnaire_rows: List[QuestionnaireRow] = []
         self.recent_configs_menu: Optional[QMenu] = None
         self.delete_configs_menu: Optional[QMenu] = None
+        self.import_mapping_menu: Optional[QMenu] = None
         
         main_widget = QWidget()
         main_layout = QVBoxLayout()
@@ -203,7 +224,7 @@ class MainWindow(QMainWindow):
         
         # Menu Actions
         button_action: QAction = QAction("&Save Configuration", self)
-        button_action.setToolTip("Save the current folder paths, surveys, and column mappings to config.ini")
+        button_action.setToolTip(f"Save folder paths, surveys, and column mappings to {CONFIG_FILENAME}")
         button_action.triggered.connect(self.showSaveConfigWindow)
         
         button_action3: QAction = QAction("User Manual", self)
@@ -225,6 +246,7 @@ class MainWindow(QMainWindow):
         
         self.recent_configs_menu = file_menu.addMenu("&Load Configuration")
         self.delete_configs_menu = file_menu.addMenu("&Delete Configuration")
+        self.import_mapping_menu = file_menu.addMenu("&Import Field Mapping")
         file_menu.aboutToShow.connect(self.updateRecentConfigsMenu)
 
         edit_mapping_action: QAction = QAction("&Save/Edit Field Mapping", self)
@@ -1310,7 +1332,7 @@ class MainWindow(QMainWindow):
         if not config_name:
             return {}
         cfg = ConfigParser()
-        cfg.read('config.ini')
+        cfg.read(get_config_path(), encoding='utf-8')
         if not cfg.has_section(config_name):
             return {}
         raw = cfg.get(config_name, 'field_mapping_json', fallback='')
@@ -1325,12 +1347,33 @@ class MainWindow(QMainWindow):
         if not config_name:
             return
         cfg = ConfigParser()
-        cfg.read('config.ini')
+        cfg.read(get_config_path(), encoding='utf-8')
         if not cfg.has_section(config_name):
             cfg.add_section(config_name)
         cfg.set(config_name, 'field_mapping_json', json.dumps(mapping, ensure_ascii=False))
-        with open('config.ini', 'w', encoding='utf-8') as f:
+        with open(get_config_path(), 'w', encoding='utf-8') as f:
             cfg.write(f)
+
+    def importFieldMapping(self, source_config_name: str) -> None:
+        """Import field mapping definitions from another configuration profile into the active workspace."""
+        source_mapping = self._load_mapping_from_config(source_config_name)
+        if not source_mapping:
+            return self.error_window(f"Configuration '{source_config_name}' does not contain any saved field mappings!")
+
+        matched_count = 0
+        for k, v in source_mapping.items():
+            if v and v != k:
+                self.field_mapping[k] = v
+                matched_count += 1
+
+        if self.active_config_name:
+            self._save_mapping_to_config(self.active_config_name, self.field_mapping)
+
+        QMessageBox.information(
+            self, "Field Mapping Imported",
+            f"Successfully imported {matched_count} field mapping(s) from '{source_config_name}'."
+            + (f"\nSaved into active configuration '{self.active_config_name}'." if self.active_config_name else "\nRetained in memory for immediate generation and extraction.")
+        )
 
     def editFieldMappingFromExtraction(self) -> None:
         expected = self._get_expected_system_fields()
@@ -1390,8 +1433,11 @@ class MainWindow(QMainWindow):
             self.recent_configs_menu.clear()
         if self.delete_configs_menu:
             self.delete_configs_menu.clear()
+        if self.import_mapping_menu:
+            self.import_mapping_menu.clear()
+            
         cfg = ConfigParser()
-        cfg.read('config.ini')
+        cfg.read(get_config_path(), encoding='utf-8')
         for s in cfg.sections():
             if s == 'PrefillDefaults':
                 continue
@@ -1403,6 +1449,11 @@ class MainWindow(QMainWindow):
                 act_d = QAction(s, self)
                 act_d.triggered.connect(lambda chk, n=s: self.confirmDeleteConfig(n))
                 self.delete_configs_menu.addAction(act_d)
+            if self.import_mapping_menu:
+                act_m = QAction(s, self)
+                act_m.setToolTip(f"Import friendly column mappings from '{s}' into current session")
+                act_m.triggered.connect(lambda chk, n=s: self.importFieldMapping(n))
+                self.import_mapping_menu.addAction(act_m)
 
     def showSaveConfigWindow(self) -> None:
         self.save_win = SaveConfigWindow(self)
@@ -1413,16 +1464,16 @@ class MainWindow(QMainWindow):
         if QMessageBox.question(self, "Confirm Delete", f"Delete configuration '{name}'?",
                                 cast(QMessageBox.StandardButton, QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)) == QMessageBox.StandardButton.Yes:
             cfg = ConfigParser()
-            cfg.read('config.ini')
+            cfg.read(get_config_path(), encoding='utf-8')
             cfg.remove_section(name)
-            with open('config.ini', 'w') as f:
+            with open(get_config_path(), 'w', encoding='utf-8') as f:
                 cfg.write(f)
 
     def ConfigGen(self, name: str) -> None:
         if not name:
             return self.error_window("No name provided!")
         cfg = ConfigParser()
-        cfg.read('config.ini')
+        cfg.read(get_config_path(), encoding='utf-8')
         if cfg.has_section(name):
             cfg.remove_section(name)
         cfg.add_section(name)
@@ -1439,7 +1490,7 @@ class MainWindow(QMainWindow):
         self.field_mapping = self._ensure_or_create_field_mapping()
         cfg.set(name, 'field_mapping_json', json.dumps(self.field_mapping, ensure_ascii=False))
         
-        with open('config.ini', 'w', encoding='utf-8') as f:
+        with open(get_config_path(), 'w', encoding='utf-8') as f:
             cfg.write(f)
         
         self.active_config_name = name
@@ -1447,7 +1498,7 @@ class MainWindow(QMainWindow):
 
     def ConfigLoad(self, name: str) -> None:
         cfg = ConfigParser()
-        cfg.read('config.ini')
+        cfg.read(get_config_path(), encoding='utf-8')
         if not cfg.has_section(name):
             return self.error_window("Configuration not found!")
         

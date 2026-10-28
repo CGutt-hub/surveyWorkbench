@@ -10,11 +10,12 @@ A desktop workbench for study coordinators and researchers. Prepare standardized
 - **Dynamic Window Resizing:** The window automatically expands or shrinks to snugly fit whatever content or questionnaire rows are active.
 - **Multi-Survey & Multi-Trial Support:** Configure unlimited questionnaire types per study, with custom repeat copy counts per participant (e.g., Trial 1, Trial 2).
 - **Consolidated Batch Processing:** Enter single IDs, paste multiple IDs, or import participant lists from text or CSV files. Generate folders or extract data in a single pass.
+- **Cross-Project Field Mapping Import:** Instantly copy friendly column header names from any previously saved study profile via the File menu dropdown, avoiding manual retyping.
 - **Smart Checkbox & Matrix Grouping:** Automatically groups checkbox arrays (like Check1_1, Check1_2) into a single column (Check1) containing the selected option number.
 - **Natural Alphanumeric Sorting:** Columns and previews are sorted naturally (Text1, Text2, ..., Text10) instead of alphabetical order (Text1, Text10, Text2).
 - **Dedicated Excel Sheets:** In Excel masterfiles, each survey type automatically writes to its own tab, keeping Column A reserved for participant_id.
 - **Friendly Column Mapping:** Rename technical PDF identifiers (e.g., Text1 -> Age) using an interactive visual editor.
-- **Project Snapshotting:** Save and reload complete project setups (paths, templates, copy counts, and custom column names) to and from config.ini.
+- **Project Snapshotting:** Save and reload complete project setups (paths, templates, copy counts, and custom column names) to and from `survey_workbench_config.txt`.
 - **Pre-Compiled & Cross-Platform:** Standalone Windows executable (.exe) ready to download without setup; native Linux binary easily built with Nuitka.
 - **Built-in Interactive Help:** Instant hover tooltips on every control, a "What's This?" interactive click mode, and an in-app viewer for this documentation.
 
@@ -68,16 +69,18 @@ If you are ever unsure what a control does:
    - Batch mode: All participants are parsed in memory and written into the masterfile in a single session without repeated file-opening delays.
 4. Excel exports create dedicated sheets per survey name, ensuring headers and schemas remain cleanly separated.
 
-### 4.3 Renaming Columns (Field Mapping)
+### 4.3 Renaming Columns & Importing Field Mappings
 To replace raw PDF identifiers with friendly column names:
-1. Open File -> Save/Edit Field Mapping.
-2. Type custom titles into the Masterfile Column Name column (e.g., change Demographics_Text1 to Age).
-3. Click Save Field Mapping. The new names will be used on all subsequent data exports.
+1. Open **File -> Save/Edit Field Mapping**.
+2. Type custom titles into the *Masterfile Column Name* column (e.g., change `Demographics_Text1` to `Age`).
+3. Click **Save Field Mapping**. The new names will be used on all subsequent data exports.
+4. **Importing Mappings from Another Project:** If you already set up friendly column names in an existing configuration, go to **File -> Import Field Mapping** and select that configuration name from the dropdown. The labels will be applied directly to the active session.
 
 ### 4.4 Managing Study Profiles
-- **Save Configuration:** Go to File -> Save Configuration and choose a profile name. All paths, questionnaire templates, counts, and column renamings are saved to config.ini.
-- **Load Configuration:** Go to File -> Load Configuration and click your saved profile name to restore everything instantly.
-- **Delete Configuration:** Go to File -> Delete Configuration to remove obsolete profiles.
+- **Save Configuration:** Go to **File -> Save Configuration** and choose a profile name. All paths, questionnaire templates, counts, and column renamings are saved to `survey_workbench_config.txt`.
+- **Load Configuration:** Go to **File -> Load Configuration** and click your saved profile name to restore everything instantly.
+- **Delete Configuration:** Go to **File -> Delete Configuration** to remove obsolete profiles.
+- **Import Field Mapping:** Go to **File -> Import Field Mapping** to borrow column names from another profile without overwriting your current folders and paths.
 
 ---
 
@@ -90,6 +93,7 @@ To replace raw PDF identifiers with friendly column names:
 | GUI Framework | PyQt5 |
 | PDF Processing | pypdf (AcroForm, widget annotations, indirect object trees) |
 | Masterfile Formats | CSV (.csv), Excel (.xlsx, .xls) |
+| Configuration File | `survey_workbench_config.txt` (stored in application root) |
 | Standalone Builds | Nuitka (portable .exe on Windows / ELF binary on Linux) |
 
 Note on Operating System Differences:
@@ -105,7 +109,7 @@ Windows users do not need to install Python, Git, or any C compiler.
 The Windows edition is already compiled with Nuitka into a portable standalone executable:
 1. Download `survey_workbench.exe` directly from the repository / releases.
 2. Place it in your desired working directory and double-click to launch.
-   All GUI modules, PDF engines, and this documentation are bundled inside.
+   All GUI modules, PDF engines, configuration management, and this documentation are bundled inside.
 
 ---
 
@@ -144,7 +148,9 @@ Linux users can compile a standalone native ELF binary directly from source usin
 
 ### Production Releases
 
-#### **v2.2 (Current Edition — Dynamic Layout & Embedded Docs)**
+#### **v2.2 (Current Edition — Dynamic Layout, Canonical Config & Embedded Docs)**
+- **Canonical Configuration File:** Renamed `config.ini` to `survey_workbench_config.txt`, strictly anchored alongside the application binary or development root.
+- **Cross-Project Field Mapping Import:** Added secondary dropdown `File -> Import Field Mapping` that dynamically lists existing projects and transfers column labels without altering study paths.
 - **Pre-Compiled Windows Binary:** Pre-built `survey_workbench.exe` compiled via Nuitka for immediate download and execution.
 - **Collapsible Curator Workspace:** Advanced configuration settings collapse into a hidden container by default, keeping the interface minimal for routine daily operations.
 - **Dynamic Window Resizing:** GUI dynamically calculates geometry and automatically adapts to shown/hidden elements.
@@ -178,9 +184,7 @@ Linux users can compile a standalone native ELF binary directly from source usin
 
 ### Historical Pre-Alpha Versions (Internal Prototypes & Proof of Concept)
 
-*The v0.x releases were internal laboratory prototypes designed to evaluate automated folder generation and Excel automation before modular production implementation.*
-
-- **v0.2 (Pre-Alpha):** Introduced first configuration persistence (config.ini) with SaveConfigWindow / LoadConfigWindow dialogs and path normalization.
+- **v0.2 (Pre-Alpha):** Introduced first configuration persistence with SaveConfigWindow / LoadConfigWindow dialogs and path normalization.
 - **v0.1 (Pre-Alpha):** Initial feasibility proof of concept. Monolithic hardcoded GUI for NASA-TLX and Demographics with basic file generation and Excel extraction.
 
 ---
