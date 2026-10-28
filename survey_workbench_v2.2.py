@@ -27,24 +27,11 @@ from pypdf.generic import NameObject, create_string_object, ArrayObject
 
 # Canonical grammar for all survey presentations
 CANONICAL_PATTERN = re.compile(r'^(Text|Check)(\d+)(?:_(\d+))?(_n)?$', re.IGNORECASE)
-CONFIG_FILENAME = "survey_workbench_config.txt"
+CONFIG_FILENAME = "survey_workbench.config"
 
 
 def get_config_path() -> str:
-    """Return canonical path to survey_workbench_config.txt alongside executable or script."""
-    candidates = [
-        # Alongside script / package source
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), CONFIG_FILENAME),
-        # Alongside compiled binary (sys.executable)
-        os.path.join(os.path.dirname(os.path.abspath(sys.executable)), CONFIG_FILENAME),
-        # Current working directory
-        os.path.join(os.getcwd(), CONFIG_FILENAME)
-    ]
-    for p in candidates:
-        if os.path.exists(p) and os.path.isfile(p):
-            return p
-            
-    # Default to directory containing binary or script
+    """Return path to survey_workbench.config alongside executable or script."""
     if getattr(sys, 'frozen', False) or getattr(sys, '__compiled__', False):
         base_dir = os.path.dirname(os.path.abspath(sys.executable))
     else:
@@ -1126,8 +1113,15 @@ class MainWindow(QMainWindow):
                         key=natural_sort_key
                     )
                     for k in sorted_field_keys:
-                        mapped_k = self.field_mapping.get(k, self.field_mapping.get(f"{sheet_name}_{k}", k))
-                        export_data[mapped_k] = raw_data[k]
+                        mapped_k = self.field_mapping.get(k)
+                        if not mapped_k:
+                            mapped_k = self.field_mapping.get(f"{sheet_name}_{k}")
+                        if not mapped_k:
+                            for map_k, map_v in self.field_mapping.items():
+                                if k.endswith(f"_{map_k}") or map_k.endswith(f"_{key}"):
+                                    mapped_k = map_v
+                                    break
+                        export_data[mapped_k or k] = raw_data[k]
 
                     existing_headers: List[str] = []
                     existing_rows: List[Dict[str, Any]] = []
