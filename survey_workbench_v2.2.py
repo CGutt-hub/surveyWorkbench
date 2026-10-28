@@ -1,20 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-Survey Workbench - Enhanced Participant Data Management System
-Version: 2.6 (Dynamic Sizing & Adaptive Layout Edition)
+Survey Workbench - Participant Data Management System
 
 Author: Cagatay Gutt
-Last Updated: 2026
-
-Features:
-- Dynamic window resizing that automatically adapts and shrinks/grows based on presented content and expansion state.
-- Compact participant declaration field with optimized sizing.
-- True collapsible curator configuration container (fully hidden/collapsed by default).
-- Parallelized Batch Mode with single consolidated preview and batch Excel writing.
-- Config snapshotting: Saves template paths, copy counts, paths, AND complete column remappings into config.ini[cite: 1].
-- Fully qualified mapping keys ({survey}_{field}) preventing cross-sheet name collisions[cite: 1].
-- Dedicated sheets per root PDF in Excel with Column A as 'participant_id'[cite: 1].
-- Natural numerical sorting (Text1, Text2... Text10) across all sheets and dialogs[cite: 1].
 """
 
 import sys
@@ -29,20 +17,20 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QPushButton,
                              QFileDialog, QMessageBox, QAction, QStatusBar,
                              QScrollArea, QVBoxLayout, QFrame,
                              QMenu, QDialog, QWhatsThis, QTextEdit, QTableWidget,
-                             QTableWidgetItem, QHeaderView, QCheckBox, QInputDialog, QHBoxLayout,
-                             QToolButton)
+                             QTableWidgetItem, QHeaderView, QCheckBox, QHBoxLayout,
+                             QToolButton, QTextBrowser)
 from configparser import ConfigParser
 from PyQt5.QtCore import pyqtSignal, Qt, QTimer
 import xlwings as xlw  # type: ignore[import]
 from pypdf import PdfReader, PdfWriter
 from pypdf.generic import NameObject, create_string_object, ArrayObject
 
-# Canonical grammar for all survey presentations (Section 7.4)[cite: 1]
+# Canonical grammar for all survey presentations
 CANONICAL_PATTERN = re.compile(r'^(Text|Check)(\d+)(?:_(\d+))?(_n)?$', re.IGNORECASE)
 
 
 def natural_sort_key(s: Any) -> List[Any]:
-    """Naturally sort alphanumeric strings so Text2 comes before Text10[cite: 1]."""
+    """Naturally sort alphanumeric strings so Text2 comes before Text10."""
     return [int(text) if text.isdigit() else text.lower() for text in re.split(r'(\d+)', str(s))]
 
 
@@ -62,6 +50,62 @@ def resolve_pdf_object(obj: Any) -> Any:
     return obj
 
 
+def find_readme_path() -> Optional[str]:
+    """Resolve README.md location across development scripts and compiled binaries."""
+    candidates = [
+        # Alongside script / package source
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), 'README.md'),
+        # Alongside compiled binary (sys.executable)
+        os.path.join(os.path.dirname(os.path.abspath(sys.executable)), 'README.md'),
+        # Current working directory
+        os.path.join(os.getcwd(), 'README.md')
+    ]
+    for p in candidates:
+        if os.path.exists(p) and os.path.isfile(p):
+            return p
+    return None
+
+
+class MarkdownManualDialog(QDialog):
+    """In-app viewer that renders README.md directly as the manual on both Windows and Linux."""
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Survey Workbench - Documentation & User Manual")
+        self.resize(880, 680)
+        
+        layout = QVBoxLayout()
+        self.browser = QTextBrowser()
+        self.browser.setOpenExternalLinks(True)
+        
+        readme_path = find_readme_path()
+        content = ""
+        if readme_path:
+            try:
+                with open(readme_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+            except Exception as e:
+                content = f"# Error Loading Manual\n\nCould not read file `{readme_path}`: {e}"
+        else:
+            content = (
+                "# Survey Workbench Documentation\n\n"
+                "**`README.md` was not found in the application directory.**\n\n"
+                "Please ensure `README.md` is placed next to the executable."
+            )
+        
+        if hasattr(self.browser, 'setMarkdown'):
+            self.browser.setMarkdown(content)
+        else:
+            self.browser.setPlainText(content)
+            
+        layout.addWidget(self.browser)
+        
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(self.close)
+        layout.addWidget(close_btn, alignment=Qt.AlignmentFlag.AlignRight)
+        
+        self.setLayout(layout)
+
+
 class SaveConfigWindow(QDialog):
     signal = pyqtSignal(str)
     
@@ -72,10 +116,17 @@ class SaveConfigWindow(QDialog):
         layout: QGridLayout = QGridLayout()
         self.title3: QLabel = QLabel("Set configuration name:")
         layout.addWidget(self.title3, 0, 0)
+        
         self.configset: QLineEdit = QLineEdit()
+        self.configset.setToolTip("Enter a unique profile name (e.g., 'Pilot_Study')")
+        self.configset.setWhatsThis("Enter a profile name. All target/source paths, templates, copy counts, and column field mappings will be saved under this name in config.ini.")
         layout.addWidget(self.configset, 0, 1)
+        
         self.save: QPushButton = QPushButton('Save configuration')
+        self.save.setToolTip("Save all settings under the specified name")
+        self.save.setWhatsThis("Click to commit and save the current configuration profile to config.ini.")
         layout.addWidget(self.save, 1, 1)
+        
         self.setLayout(layout)
         self.save.clicked.connect(self.troubleshoot)
         
@@ -106,16 +157,27 @@ class SaveConfigWindow(QDialog):
 
 
 class QuestionnaireRow:
-    """Represents a single questionnaire configuration row"""
+    """Represents a single questionnaire configuration row with help hints."""
     def __init__(self, index: int) -> None:
         self.index: int = index
         self.name_label: QLabel = QLabel(f"Survey {index + 1} name:")
         self.name_edit: QLineEdit = QLineEdit()
+        self.name_edit.setToolTip("Short name for this survey (e.g., 'Demographics', 'NASA_TLX')")
+        self.name_edit.setWhatsThis("Used to rename the generated PDF files and serves as the Excel sheet / tab name during extraction.")
+        
         self.path_label: QLabel = QLabel("Template PATH:")
         self.path_display: QLabel = QLabel()
+        self.path_display.setToolTip("Path to the selected PDF form template")
+        
         self.path_button: QPushButton = QPushButton("Search")
+        self.path_button.setToolTip("Select master fillable PDF template")
+        self.path_button.setWhatsThis("Open a file dialog to choose the fillable master PDF form template for this questionnaire.")
+        
         self.count_label: QLabel = QLabel("Number of copies:")
         self.count_edit: QLineEdit = QLineEdit("1")
+        self.count_edit.setToolTip("How many copies of this survey each participant receives (e.g., repeated trials)")
+        self.count_edit.setWhatsThis("If a survey is taken multiple times per participant (e.g., across multiple blocks), enter the count here.")
+        
         self.template_path: str = ""
         
     def get_widgets(self) -> List[QWidget]:
@@ -129,7 +191,7 @@ class QuestionnaireRow:
 class MainWindow(QMainWindow):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Survey Workbench v2.6")
+        self.setWindowTitle("Survey Workbench")
         
         self.questionnaire_rows: List[QuestionnaireRow] = []
         self.recent_configs_menu: Optional[QMenu] = None
@@ -137,15 +199,19 @@ class MainWindow(QMainWindow):
         
         main_widget = QWidget()
         main_layout = QVBoxLayout()
-        main_layout.setSizeConstraint(QVBoxLayout.SetFixedSize)  # Enables dynamic resizing based on contents
+        main_layout.setSizeConstraint(QVBoxLayout.SetFixedSize)
         
+        # Menu Actions
         button_action: QAction = QAction("&Save Configuration", self)
+        button_action.setToolTip("Save the current folder paths, surveys, and column mappings to config.ini")
         button_action.triggered.connect(self.showSaveConfigWindow)
         
         button_action3: QAction = QAction("User Manual", self)
-        button_action3.triggered.connect(self.onMyToolBarButtonClick3)
+        button_action3.setToolTip("Open the built-in documentation and user manual")
+        button_action3.triggered.connect(self.openUserManual)
         
         whats_this_action: QAction = QAction("What's This? (Click for Help)", self)
+        whats_this_action.setToolTip("Turn the mouse into a help cursor, then click any item to learn about it.")
         whats_this_action.triggered.connect(self.enterWhatsThisMode)
         whats_this_action.setShortcut("Shift+F1")
         
@@ -163,7 +229,7 @@ class MainWindow(QMainWindow):
 
         edit_mapping_action: QAction = QAction("&Save/Edit Field Mapping", self)
         edit_mapping_action.triggered.connect(self.editFieldMappingFromExtraction)
-        edit_mapping_action.setToolTip("Edit and save the column name remapping for the active configuration")
+        edit_mapping_action.setToolTip("Edit friendly column header names for Excel/CSV exports")
         file_menu.addAction(edit_mapping_action)
         
         help_menu = menubar.addMenu("&HELP")
@@ -171,7 +237,7 @@ class MainWindow(QMainWindow):
         help_menu.addAction(whats_this_action)
         help_menu.addAction(button_action3)
         
-        # ========== PARTICIPANT DECLARATION SECTION (UNIFIED & COMPACT) ==========
+        # ========== PARTICIPANT DECLARATION SECTION ==========
         part_frame: QFrame = QFrame()
         part_frame.setFrameStyle(QFrame.Shape.Box | QFrame.Shadow.Raised)
         part_layout = QGridLayout()
@@ -182,16 +248,23 @@ class MainWindow(QMainWindow):
         part_label = QLabel("Participant ID(s):")
         part_label.setStyleSheet("font-weight: bold")
         self.nameset = QLineEdit()
-        self.nameset.setToolTip("Enter single participant ID (e.g., P001)")
+        self.nameset.setToolTip("Enter a single participant ID (e.g., P001).")
+        self.nameset.setWhatsThis("Type the unique identifier for a single participant. A dedicated subfolder with this name will be created inside the target folder.")
         
         self.batch_mode_global = QCheckBox("Batch Mode (multiple IDs)")
+        self.batch_mode_global.setToolTip("Check this box to input or import multiple participant IDs simultaneously.")
+        self.batch_mode_global.setWhatsThis("Enables Batch Mode. When checked, you can enter multiple IDs (one per line or comma-separated) or import them from a .txt or .csv list.")
         self.batch_mode_global.toggled.connect(self.toggleBatchModeGlobal)
         
         import_list_btn = QPushButton("Import List...")
+        import_list_btn.setToolTip("Load a text (.txt) or CSV (.csv) file containing participant IDs.")
+        import_list_btn.setWhatsThis("Open a file dialog to load participant IDs from an external plain text or CSV file.")
         import_list_btn.clicked.connect(lambda: self.importParticipantList(self.batch_text_global))
         
         self.batch_text_global = QTextEdit()
         self.batch_text_global.setPlaceholderText("Enter participant IDs (one per line or comma-separated):\nP001\nP002\nP003")
+        self.batch_text_global.setToolTip("Enter multiple participant IDs, one per line or separated by commas.")
+        self.batch_text_global.setWhatsThis("Type or paste multiple participant IDs. Folder generation and data extraction will automatically iterate through all listed IDs in a single session.")
         self.batch_text_global.setVisible(False)
         self.batch_text_global.setMaximumHeight(80)
         
@@ -205,13 +278,15 @@ class MainWindow(QMainWindow):
         part_frame.setLayout(part_layout)
         main_layout.addWidget(part_frame)
 
-        # ========== COLLAPSIBLE CONFIGURATION CONTAINER (HIDDEN BY DEFAULT) ==========
+        # ========== COLLAPSIBLE CONFIGURATION CONTAINER ==========
         self.toggle_config_btn = QToolButton()
         self.toggle_config_btn.setText("▶ Configuration Settings")
         self.toggle_config_btn.setStyleSheet("font-weight: bold; border: none; text-align: left; padding: 5px;")
         self.toggle_config_btn.setCheckable(True)
         self.toggle_config_btn.setChecked(False)
         self.toggle_config_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.toggle_config_btn.setToolTip("Click to expand or collapse study setup paths and questionnaire templates.")
+        self.toggle_config_btn.setWhatsThis("Expands or collapses the curator configuration settings. These can remain hidden during routine participant generation and extraction.")
         self.toggle_config_btn.clicked.connect(self.toggleConfigurationContainer)
         main_layout.addWidget(self.toggle_config_btn)
 
@@ -229,12 +304,20 @@ class MainWindow(QMainWindow):
         
         target_label = QLabel("Target folder PATH:")
         self.target_pathset = QLabel()
+        self.target_pathset.setToolTip("Directory where new participant folders will be created.")
         target_pathbut = QPushButton("Search")
+        target_pathbut.setToolTip("Choose destination directory for generated folders.")
+        target_pathbut.setWhatsThis("Click Search to select the folder where the software will build each participant's directory and survey copies.")
         target_pathbut.clicked.connect(self.select_target_folder)
         
         quest_count_label = QLabel("Number of questionnaire types:")
         self.quest_count_edit = QLineEdit()
+        self.quest_count_edit.setToolTip("Total distinct survey forms in your study (e.g. 2 for Demographics and NASA-TLX).")
+        self.quest_count_edit.setWhatsThis("Type the number of different PDF forms you want to configure, then click Confirm.")
+        
         quest_count_button = QPushButton("Confirm")
+        quest_count_button.setToolTip("Create template configuration rows.")
+        quest_count_button.setWhatsThis("Generates rows below where you can select each survey's template PDF and set copy counts.")
         quest_count_button.clicked.connect(self.create_questionnaire_rows)
         
         gen_layout.addWidget(gen_title, 0, 0, 1, 3)
@@ -261,17 +344,23 @@ class MainWindow(QMainWindow):
         extract_frame.setFrameStyle(QFrame.Shape.Box | QFrame.Shadow.Raised)
         extract_layout = QGridLayout()
         
-        extract_title = QLabel("Extract Data to Excel")
+        extract_title = QLabel("Extract Data to Masterfile")
         extract_title.setStyleSheet("font-weight: bold; font-size: 13px;")
         
         source_label = QLabel("Source folder PATH:")
         self.source_pathset = QLabel()
+        self.source_pathset.setToolTip("Directory where completed participant folders are saved.")
         source_pathbut = QPushButton("Search")
+        source_pathbut.setToolTip("Select the root folder containing completed participant folders.")
+        source_pathbut.setWhatsThis("Choose the folder containing completed participant subfolders. The extractor scans each participant's PDFs inside this directory.")
         source_pathbut.clicked.connect(self.select_source_folder)
         
         excel_label = QLabel("Masterfile PATH:")
         self.excel_pathset = QLabel()
+        self.excel_pathset.setToolTip("Destination Excel (.xlsx / .xls) or CSV (.csv) file.")
         excel_pathbut = QPushButton("Search")
+        excel_pathbut.setToolTip("Select or create your master spreadsheet.")
+        excel_pathbut.setWhatsThis("Choose your masterfile. Data from questionnaires will be written into dedicated sheets (Excel) or CSV files.")
         excel_pathbut.clicked.connect(self.select_excel_file)
         
         extract_layout.addWidget(extract_title, 0, 0, 1, 3)
@@ -286,17 +375,21 @@ class MainWindow(QMainWindow):
         config_container_layout.addWidget(extract_frame)
 
         self.config_container.setLayout(config_container_layout)
-        self.config_container.setVisible(False)  # Collapsed by default for end-users
+        self.config_container.setVisible(False)
         main_layout.addWidget(self.config_container)
         
-        # ========== ACTION BUTTONS (ALWAYS VISIBLE FOR END-USERS) ==========
+        # ========== ACTION BUTTONS (ALWAYS VISIBLE) ==========
         action_layout = QHBoxLayout()
         self.generate_button = QPushButton("Generate Participant Folder(s)")
         self.generate_button.setStyleSheet("font-weight: bold; padding: 10px;")
+        self.generate_button.setToolTip("Create participant folder(s), duplicate templates, and open the prefill dialog.")
+        self.generate_button.setWhatsThis("Click to start generating folders and surveys for all declared participant IDs using the active configuration.")
         self.generate_button.clicked.connect(self.generate_participant_folder)
         
         self.extract_button = QPushButton("Extract Data to Masterfile")
         self.extract_button.setStyleSheet("font-weight: bold; padding: 10px;")
+        self.extract_button.setToolTip("Read PDF answers from completed participant folders into your Excel or CSV masterfile.")
+        self.extract_button.setWhatsThis("Reads form field values from completed surveys in the Source folder and appends them to your masterfile.")
         self.extract_button.clicked.connect(self.extract_data)
 
         action_layout.addWidget(self.generate_button)
@@ -312,22 +405,19 @@ class MainWindow(QMainWindow):
         self.active_config_name: str = ""
         self.field_mapping: Dict[str, str] = {}
         
-        # Initial compact sizing and adjustment
         self.adjustSize()
 
     def toggleConfigurationContainer(self, checked: bool) -> None:
-        """Toggles the visibility of the configuration container and dynamically adjusts window size."""
         self.config_container.setVisible(checked)
-        if checked:
-            self.toggle_config_btn.setText("▼ Configuration Settings")
-        else:
-            self.toggle_config_btn.setText("▶ Configuration Settings")
-        
-        # Dynamically resize window to snugly fit current contents
+        self.toggle_config_btn.setText("▼ Configuration Settings" if checked else "▶ Configuration Settings")
         QTimer.singleShot(10, self.adjustSize)
 
+    def openUserManual(self) -> None:
+        """Opens the in-app markdown manual dialog rendering README.md."""
+        dlg = MarkdownManualDialog(self)
+        dlg.exec()
+
     def get_configured_root_order(self) -> List[str]:
-        """Return root questionnaires in the exact order configured in the UI."""
         order = []
         for r in self.questionnaire_rows:
             name = r.name_edit.text().strip()
@@ -336,7 +426,6 @@ class MainWindow(QMainWindow):
         return order
 
     def _get_root_survey_name(self, clean_filename: str) -> str:
-        """Derive the root questionnaire type (e.g. 'nasa1' -> 'nasa', 'protocol' -> 'protocol')."""
         clean = clean_filename.strip()
         for s_name in self.get_configured_root_order():
             if clean == s_name or clean.startswith(s_name):
@@ -426,9 +515,9 @@ class MainWindow(QMainWindow):
             if not participant_ids:
                 return self.error_window("Please enter at least one participant ID!")
             if not self.target_path:
-                return self.error_window("Please select a target folder! (Expand 'Configuration Settings' to configure paths)")
+                return self.error_window("Please select a target folder! (Expand 'Configuration Settings' to set paths)")
             if not self.questionnaire_rows:
-                return self.error_window("Please configure questionnaires! (Expand 'Configuration Settings' to configure templates)")
+                return self.error_window("Please configure questionnaires! (Expand 'Configuration Settings' to set templates)")
 
             all_generated_pdf_paths: Dict[str, List[str]] = {}
             for pid in participant_ids:
@@ -529,7 +618,6 @@ class MainWindow(QMainWindow):
             writer.write(output_file)
 
     def _extract_pdf_form_fields(self, pdf_path: str) -> Dict[str, str]:
-        """Extract all form fields from any PDF, resolving matrices, radio buttons, and text cells."""
         try:
             reader = PdfReader(pdf_path)
         except Exception:
@@ -811,7 +899,6 @@ class MainWindow(QMainWindow):
         raise ValueError("Generation cancelled by user")
 
     def _prepare_data_for_extraction(self, participant_id: str) -> Dict[str, Dict[str, Any]]:
-        """Extract data segregated by root sheet name, preserving root sequence and numerical order[cite: 1]."""
         normalized_source = os.path.normpath(self.source_path)
         participant_folder = self.source_path if normalized_source.endswith(participant_id) else os.path.join(self.source_path, participant_id)
         
@@ -875,7 +962,6 @@ class MainWindow(QMainWindow):
         return sheet_data
 
     def _readout_batch(self, participant_ids: List[str]) -> None:
-        """Route all participants' extracted data into masterfile sheets in a single session without repeated file openings."""
         if not self.excel_path:
             raise ValueError("Please select a masterfile! (Expand 'Configuration Settings' to select masterfile)")
 
@@ -966,10 +1052,8 @@ class MainWindow(QMainWindow):
                                     break
                                 r_idx += 1
 
-                            if target_row is not None:
-                                next_row = target_row
-                            else:
-                                next_row = 2
+                            next_row = target_row if target_row is not None else 2
+                            if target_row is None:
                                 while sheet.range(f'A{next_row}').value is not None:
                                     next_row += 1
 
@@ -1079,7 +1163,6 @@ class MainWindow(QMainWindow):
             self.error_window(f"Error extracting data: {str(e)}")
 
     def showPreviewDialog(self, participant_id: str, sheet_data: Dict[str, Dict[str, Any]]) -> Tuple[bool, Dict[str, Dict[str, Any]]]:
-        """4-column preview ordered first by root-PDF sequence, then numerically[cite: 1]."""
         dialog = QDialog(self)
         dialog.setWindowTitle("Preview Data Extraction")
         dialog.setModal(True)
@@ -1336,7 +1419,6 @@ class MainWindow(QMainWindow):
                 cfg.write(f)
 
     def ConfigGen(self, name: str) -> None:
-        """Create a complete snapshot including folders, questionnaires, and name remapping[cite: 1]."""
         if not name:
             return self.error_window("No name provided!")
         cfg = ConfigParser()
@@ -1361,10 +1443,9 @@ class MainWindow(QMainWindow):
             cfg.write(f)
         
         self.active_config_name = name
-        QMessageBox.information(self, "Success", f"Configuration snapshot '{name}' (with name remapping) saved successfully!")
+        QMessageBox.information(self, "Success", f"Configuration snapshot '{name}' saved successfully!")
 
     def ConfigLoad(self, name: str) -> None:
-        """Load a complete snapshot, restoring all forms and column name remappings."""
         cfg = ConfigParser()
         cfg.read('config.ini')
         if not cfg.has_section(name):
@@ -1391,17 +1472,10 @@ class MainWindow(QMainWindow):
         self.active_config_name = name
         self.field_mapping = self._load_mapping_from_config(name)
         
-        QMessageBox.information(self, "Success", f"Configuration snapshot '{name}' (with column name remapping) loaded successfully!")
+        QMessageBox.information(self, "Success", f"Configuration snapshot '{name}' loaded successfully!")
 
     def enterWhatsThisMode(self) -> None:
         QWhatsThis.enterWhatsThisMode()
-
-    def onMyToolBarButtonClick3(self) -> None:
-        manual_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'USER_MANUAL.pdf')
-        if os.path.exists(manual_path):
-            os.startfile(manual_path)
-        else:
-            self.error_window("Manual not found:\n" + manual_path)
 
     def toggleBatchModeGlobal(self, checked: bool) -> None:
         self.nameset.setVisible(not checked)
