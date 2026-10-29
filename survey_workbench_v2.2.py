@@ -32,11 +32,37 @@ CONFIG_FILENAME = "survey_workbench.config"
 
 def get_config_path() -> str:
     """Return path to survey_workbench.config alongside executable or script."""
-    if getattr(sys, 'frozen', False) or getattr(sys, '__compiled__', False):
-        base_dir = os.path.dirname(os.path.abspath(sys.executable))
+    # 1. Nuitka onefile runtime environment variable (points directly to host binary directory)
+    if "NUITKA_ONEFILE_DIRECTORY" in os.environ:
+        base_dir = os.environ["NUITKA_ONEFILE_DIRECTORY"]
+    # 2. General compiled or frozen environment fallback (Nuitka standalone or PyInstaller)
+    elif getattr(sys, 'frozen', False) or "__compiled__" in globals():
+        exe_path = sys.argv[0] if sys.argv and sys.argv[0] else sys.executable
+        base_dir = os.path.dirname(os.path.abspath(exe_path))
+    # 3. Direct execution from Python source
     else:
         base_dir = os.path.dirname(os.path.abspath(__file__))
     return os.path.join(base_dir, CONFIG_FILENAME)
+
+
+def ensure_config_file_exists() -> str:
+    """Ensure config file exists next to the executable/script, seeding from bundled copy if available."""
+    cfg_path = get_config_path()
+    if not os.path.exists(cfg_path):
+        # Check if an initial template config was bundled inside the onefile payload
+        bundled_cfg = os.path.join(os.path.dirname(os.path.abspath(__file__)), CONFIG_FILENAME)
+        if os.path.exists(bundled_cfg) and os.path.abspath(bundled_cfg) != os.path.abspath(cfg_path):
+            try:
+                shutil.copy2(bundled_cfg, cfg_path)
+            except Exception:
+                pass
+        else:
+            try:
+                with open(cfg_path, 'w', encoding='utf-8') as f:
+                    pass
+            except Exception:
+                pass
+    return cfg_path
 
 
 def natural_sort_key(s: Any) -> List[Any]:
@@ -67,6 +93,8 @@ def find_readme_path() -> Optional[str]:
         os.path.join(os.path.dirname(os.path.abspath(sys.executable)), 'README.md'),
         os.path.join(os.getcwd(), 'README.md')
     ]
+    if "NUITKA_ONEFILE_DIRECTORY" in os.environ:
+        candidates.insert(0, os.path.join(os.environ["NUITKA_ONEFILE_DIRECTORY"], 'README.md'))
     for p in candidates:
         if os.path.exists(p) and os.path.isfile(p):
             return p
@@ -137,7 +165,7 @@ class SaveConfigWindow(QDialog):
         self.setLayout(layout)
         self.save.clicked.connect(self.troubleshoot)
         
-    def troubleshoot(self) -> None:
+    def troubleshoot(self, checked: bool = False) -> None:
         self.name = self.configset.text().strip()
         if not self.name:
             return
@@ -199,6 +227,7 @@ class MainWindow(QMainWindow):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Survey Workbench")
+        ensure_config_file_exists()
         
         self.questionnaire_rows: List[QuestionnaireRow] = []
         self.recent_configs_menu: Optional[QMenu] = None
