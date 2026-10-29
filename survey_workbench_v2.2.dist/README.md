@@ -1,20 +1,24 @@
 # Survey Workbench
 
-A desktop workbench for study coordinators and researchers. Prepare standardized participant folders with fillable PDF questionnaires, prefill initial values, and extract completed survey answers directly into multi-sheet Excel workbooks or CSV files.
+A desktop workbench for study coordinators and researchers. Prepare standardized participant folders with fillable PDF questionnaires, prefill initial values, and extract completed survey answers directly into Apache Parquet, Excel workbooks, CSV, TSV, or JSON masterfiles.
 
 ---
 
 ## 1. Overview & Key Features
 
-- **Collapsible Workspace:** Curator settings stay tucked inside a collapsible drawer, leaving a clean, compact window for day-to-day folder generation and data extraction.
-- **Dynamic Window Resizing:** The window automatically expands or shrinks to snugly fit whatever content or questionnaire rows are active.
-- **Multi-Survey & Multi-Trial Support:** Configure unlimited questionnaire types per study, with custom repeat copy counts per participant (e.g., Trial 1, Trial 2).
+- **Multi-Format Masterfile Exports:**
+  - **Apache Parquet (`.parquet`):** High-speed columnar storage optimized for data science pipelines (Python, R, Polars, DuckDB, Julia).
+  - **Microsoft Excel (`.xlsx`, `.xls`):** Dedicated tabs per questionnaire type, keeping schemas clean and isolated.
+  - **Delimited Text (`.csv`, `.tsv`, `.tab`):** Standard comma- or tab-separated tables with zero third-party dependencies.
+  - **Structured JSON (`.json`):** Human-readable, structured data arrays.
 - **Consolidated Batch Processing:** Enter single IDs, paste multiple IDs, or import participant lists from text or CSV files. Generate folders or extract data in a single pass.
-- **Cross-Project Field Mapping Import:** Instantly copy friendly column header names from any previously saved study profile via the `File -> Import Field Mapping` submenu (just like Load and Delete Configuration), avoiding manual retyping.
+- **Interactive Overwrite Resolution:** If folders or masterfile records already exist, an interactive checklist lets you select exactly which participants to overwrite (with one-click *Select All* / *Deselect All*), avoiding accidental data loss.
+- **Unified Batch Preview Table:** Both folder generation and masterfile extraction open a single, consolidated table displaying all participants at once. Inspect and edit friendly header names and questionnaire answers before committing any changes.
+- **Safe Staging:** Prefill values and survey folders are validated in memory before any directory is modified on disk. If you cancel, nothing is touched.
+- **Collapsible Workspace & Dynamic Resizing:** Curator settings stay tucked inside a collapsible drawer, leaving a clean, compact window that automatically resizes to fit active study configurations.
+- **Cross-Project Field Mapping Import:** Instantly copy friendly column header names from any previously saved study profile via the `File -> Import Field Mapping` submenu.
 - **Smart Checkbox & Matrix Grouping:** Automatically groups checkbox arrays (like Check1_1, Check1_2) into a single column (Check1) containing the selected option number.
 - **Natural Alphanumeric Sorting:** Columns and previews are sorted naturally (Text1, Text2, ..., Text10) instead of alphabetical order (Text1, Text10, Text2).
-- **Dedicated Excel Sheets:** In Excel masterfiles, each survey type automatically writes to its own tab, keeping Column A reserved for participant_id.
-- **Friendly Column Mapping:** Rename technical PDF identifiers (e.g., Text1 -> Age) using an interactive visual editor.
 - **Project Snapshotting:** Save and reload complete project setups (paths, templates, copy counts, and custom column names) to and from `survey_workbench.config`.
 - **Pre-Compiled & Cross-Platform:** Standalone Windows executable (.exe) ready to download without setup; native Linux binary easily built with Nuitka.
 - **Built-in Interactive Help:** Instant hover tooltips on every control, a "What's This?" interactive click mode, and an in-app viewer for this documentation.
@@ -24,21 +28,21 @@ A desktop workbench for study coordinators and researchers. Prepare standardized
 ## 2. Quick Start Guide
 
 ### Step 1: Declare Participant(s)
-- **Single participant:** Type the identifier (e.g., P001) into the Participant ID(s) box.
-- **Multiple participants:** Check Batch Mode, then paste IDs (one per line or comma-separated) or click Import List... to load a .txt or .csv file.
+- **Single participant:** Type the identifier (e.g., `P001`) into the Participant ID(s) box.
+- **Multiple participants:** Check **Batch Mode**, then paste IDs (one per line or comma-separated) or click **Import List...** to load a `.txt` or `.csv` list.
 
 ### Step 2: Configure the Study (First-Time Setup)
-Click ▶ Configuration Settings to open the setup panels:
+Click ▶ **Configuration Settings** to open the setup panels:
 1. **Target folder PATH:** Choose where new participant folders will be created.
 2. **Questionnaires:** Enter the number of survey types, click Confirm, then give each survey a name, select its PDF template, and specify how many copies each participant gets.
 3. **Source folder PATH:** Choose where completed participant folders are saved.
-4. **Masterfile PATH:** Choose your destination .xlsx, .xls, or .csv file.
+4. **Masterfile PATH:** Choose your destination file (`.parquet`, `.xlsx`, `.csv`, `.tsv`, or `.json`).
 
 Tip: Go to **File -> Save Configuration** to save this setup under a profile name so you can reload it anytime without re-entering paths.
 
 ### Step 3: Run Actions
-- **Generate Participant Folder(s):** Creates the folders, copies and renames the survey PDFs, and opens a review window to check prefilled values.
-- **Extract Data to Masterfile:** Scans completed PDFs from the source folder and writes all answers cleanly into your masterfile.
+- **Generate Participant Folder(s):** Checks for existing folders, opens the prefill preview table, and generates the participant survey copies.
+- **Extract Data to Masterfile:** Checks for existing spreadsheet records, opens the consolidated extraction review table, and commits answers into your masterfile in one single pass.
 
 ---
 
@@ -55,76 +59,60 @@ If you are ever unsure what a control does:
 
 ### 4.1 Generating Folders & Prefilling Data
 1. Enter your participant ID(s).
-2. Click Generate Participant Folder(s).
-3. A Batch Preview & Generation table appears, listing all detected form fields across the templates.
-4. Any ID fields (such as participant_id or Text13_n) are automatically prefilled with the participant ID.
-5. Review or edit values directly in the table, then click Confirm and Generate All.
-6. Each participant will receive a dedicated folder containing the prepared PDFs ready for data collection.
+2. Click **Generate Participant Folder(s)**.
+3. **Overwrite Check:** If any participant folders already exist, a resolution window prompts you to tick which folders to overwrite (or skip).
+4. **Batch Prefill Table:** A consolidated preview window displays all detected form fields across all participants. Any ID fields (such as `participant_id` or `Text13_n`) are automatically prefilled.
+5. Review or edit values directly in the table, then click **Confirm and Generate All**.
+6. Each participant receives a dedicated folder containing the prepared PDFs ready for data collection.
 
 ### 4.2 Extracting Data to Masterfile
-1. Make sure your Source folder points to the completed participant folders.
-2. Make sure your Masterfile points to your target spreadsheet.
-3. Click Extract Data to Masterfile:
-   - Single participant: A 4-column review dialog (Sheet, Field, Name, Data) allows you to inspect and modify extracted values before committing them.
-   - Batch mode: All participants are parsed in memory and written into the masterfile in a single session without repeated file-opening delays.
-4. Excel exports create dedicated sheets per survey name, ensuring headers and schemas remain cleanly separated.
+1. Ensure your **Source folder** points to the completed participant folders and **Masterfile** points to your target file (`.parquet`, `.xlsx`, `.csv`, `.tsv`, or `.json`).
+2. Click **Extract Data to Masterfile**:
+   - **Overwrite Check:** If any participant already exists in your masterfile, a pop-up checklist lets you choose which participant rows to update.
+   - **Batch Extraction Review Table:** A consolidated table (`Participant ID`, `Sheet`, `Field`, `Column Name`, `Data`) opens with all participant data loaded into memory. You can inspect or correct values directly.
+3. Click **Confirm and Extract All**. The masterfile is written in a single pass without repeatedly launching office applications.
 
-### 4.3 Renaming Columns & Importing Field Mappings
+### 4.3 Output File Partitioning
+- **Excel (`.xlsx`, `.xls`):** Each questionnaire type is saved as a dedicated worksheet / tab.
+- **Parquet (`.parquet`):** Automatically creates partitioned parquet tables named `<masterfile>_<survey_name>.parquet`.
+- **CSV / TSV (`.csv`, `.tsv`):** Automatically writes partitioned files named `<masterfile>_<survey_name>.csv` / `.tsv`.
+- **JSON (`.json`):** Automatically writes arrays named `<masterfile>_<survey_name>.json`.
+
+### 4.4 Renaming Columns & Importing Field Mappings
 To replace raw PDF identifiers with friendly column names:
 1. Open **File -> Save/Edit Field Mapping**.
 2. Type custom titles into the *Masterfile Column Name* column (e.g., change `Demographics_Text1` to `Age`).
 3. Click **Save Field Mapping**. The new names will be used on all subsequent data exports.
-4. **Importing Mappings from Another Project:** Go to **File -> Import Field Mapping ▶** and choose any saved configuration from the submenu list (just like Load and Delete Configuration). The column renamings will immediately apply to your current session.
-
-### 4.4 Managing Study Profiles
-- **Save Configuration:** Go to **File -> Save Configuration** and choose a profile name. All paths, questionnaire templates, counts, and column renamings are saved to `survey_workbench.config`.
-- **Load Configuration:** Go to **File -> Load Configuration ▶** and click your saved profile name to restore everything instantly.
-- **Delete Configuration:** Go to **File -> Delete Configuration ▶** to remove obsolete profiles.
-- **Import Field Mapping:** Go to **File -> Import Field Mapping ▶** to borrow column names from another profile without overwriting your current folders and paths.
+4. **Importing Mappings from Another Project:** Go to **File -> Import Field Mapping ▶** and choose any saved configuration from the submenu list to borrow column names immediately.
 
 ---
 
-## 5. Technical Specifications
+## 5. Technical Specifications & Dependencies
 
-| Parameter | Specification |
-|---|---|
-| Supported OS | Windows 10/11, Linux (Ubuntu/Debian/Fedora/Arch), macOS |
-| Python Runtime | Python 3.9 through 3.13 |
-| GUI Framework | PyQt5 |
-| PDF Processing | pypdf (AcroForm, widget annotations, indirect object trees) |
-| Masterfile Formats | CSV (.csv), Excel (.xlsx, .xls) |
-| Configuration File | `survey_workbench.config` (stored in application root) |
-| Standalone Builds | Nuitka (portable .exe on Windows / ELF binary on Linux) |
+- **Supported OS:** Windows 10/11, Linux (Ubuntu/Debian/Fedora/Arch), macOS
+- **Python Runtime:** Python 3.9 through 3.13
+- **GUI Framework:** PyQt5
+- **PDF Processing:** pypdf (AcroForm, widget annotations, indirect object trees)
+- **Masterfile Formats:** Apache Parquet (`.parquet`), Excel (`.xlsx`, `.xls`), CSV (`.csv`), TSV (`.tsv`), JSON (`.json`)
+- **Parquet Engine:** `pyarrow` (recommended) or `pandas`
+- **Configuration File:** `survey_workbench.config` (stored in application root)
+- **Standalone Builds:** Nuitka (portable .exe on Windows / ELF binary on Linux)
 
-Note on Operating System Differences:
-- CSV masterfiles work 100% natively on both Linux and Windows without requiring any external office suite.
-- Excel masterfiles (.xlsx, .xls) automated via xlwings rely on Microsoft Excel (standard on Windows). On Linux systems without MS Excel, selecting .csv as the masterfile format is recommended.
-
----
-
-## 6. Download & Installation
-
-### 6.1 Windows (Pre-Compiled Executable)
-Windows users do not need to install Python, Git, or any C compiler.
-The Windows edition is already compiled with Nuitka into a portable standalone executable:
-1. Download `survey_workbench.exe` directly from the repository / releases.
-2. Place it in your desired working directory and double-click to launch.
-   All GUI modules, PDF engines, configuration management, and this documentation are bundled inside.
-
----
-
-### 6.2 Linux Compilation (Native ELF Binary)
-Linux users can compile a standalone native ELF binary directly from source using Nuitka:
-
+To install all supported format engines:
 ```bash
-# 1. Install build tools (Debian/Ubuntu)
-sudo apt update && sudo apt install build-essential python3-dev -y
-pip install -r requirements.txt
-pip install nuitka zstandard
+pip install pyarrow xlwings pypdf PyQt5
+```
 
-# 2. Compile native executable
+---
+
+## 6. Compilation with Nuitka
+
+### Windows Build Command:
+```cmd
+python -m nuitka --standalone --onefile --enable-plugin=pyqt5 --include-data-file=README.md=README.md --windows-console-mode=disable --output-filename=survey_workbench.exe survey_workbench_v2.2.py
+```
+
+### Linux Build Command:
+```bash
 python3 -m nuitka --standalone --onefile --enable-plugin=pyqt5 --include-data-file=README.md=README.md --output-filename=survey_workbench survey_workbench_v2.2.py
-
-# 3. Run
-chmod +x survey_workbench
-./survey_workbench
+```

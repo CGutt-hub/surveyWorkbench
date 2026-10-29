@@ -1,17 +1,10 @@
-# -*- coding: utf-8 -*-
-"""
-Survey Workbench - Participant Data Management System
-
-Author: Cagatay Gutt
-"""
-
 import sys
 import os
 import shutil
 import csv
 import json
 import re
-from typing import Optional, List, cast, Dict, Any, Tuple
+from typing import Optional, List, cast, Dict, Any, Tuple, Set
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QPushButton, 
                              QGridLayout, QWidget, QLineEdit, QLabel,
                              QFileDialog, QMessageBox, QAction, QStatusBar,
@@ -24,6 +17,20 @@ from PyQt5.QtCore import pyqtSignal, Qt, QTimer
 import xlwings as xlw  # type: ignore[import]
 from pypdf import PdfReader, PdfWriter
 from pypdf.generic import NameObject, create_string_object, ArrayObject
+
+# Optional Parquet Engines (PyArrow / Pandas)
+try:
+    import pyarrow as pa  # type: ignore[import]
+    import pyarrow.parquet as pq  # type: ignore[import]
+    HAS_PYARROW = True
+except ImportError:
+    HAS_PYARROW = False
+
+try:
+    import pandas as pd  # type: ignore[import]
+    HAS_PANDAS = True
+except ImportError:
+    HAS_PANDAS = False
 
 # Canonical grammar for all survey presentations
 CANONICAL_PATTERN = re.compile(r'^(Text|Check)(\d+)(?:_(\d+))?(_n)?$', re.IGNORECASE)
@@ -49,7 +56,6 @@ def ensure_config_file_exists() -> str:
     """Ensure config file exists next to the executable/script, seeding from bundled copy if available."""
     cfg_path = get_config_path()
     if not os.path.exists(cfg_path):
-        # Check if an initial template config was bundled inside the onefile payload
         bundled_cfg = os.path.join(os.path.dirname(os.path.abspath(__file__)), CONFIG_FILENAME)
         if os.path.exists(bundled_cfg) and os.path.abspath(bundled_cfg) != os.path.abspath(cfg_path):
             try:
@@ -139,6 +145,84 @@ class MarkdownManualDialog(QDialog):
         layout.addWidget(close_btn, alignment=Qt.AlignmentFlag.AlignRight)
         
         self.setLayout(layout)
+
+
+class OverwriteResolutionDialog(QDialog):
+    """Pops up when existing participants are detected, letting users select which to overwrite."""
+    def __init__(self, existing_pids: List[str], title: str, prompt: str, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setModal(True)
+        self.resize(520, 420)
+        
+        self.checkboxes: Dict[str, QCheckBox] = {}
+        
+        layout = QVBoxLayout()
+        
+        prompt_label = QLabel(prompt)
+        prompt_label.setWordWrap(True)
+        prompt_label.setStyleSheet("font-weight: bold; font-size: 13px; margin-bottom: 5px;")
+        layout.addWidget(prompt_label)
+        
+        btn_bar = QHBoxLayout()
+        select_all_btn = QPushButton("Select All")
+        deselect_all_btn = QPushButton("Deselect All")
+        select_all_btn.clicked.connect(self.select_all)
+        deselect_all_btn.clicked.connect(self.deselect_all)
+        btn_bar.addWidget(select_all_btn)
+        btn_bar.addWidget(deselect_all_btn)
+        btn_bar.addStretch()
+        layout.addLayout(btn_bar)
+        
+        table = QTableWidget(len(existing_pids), 2)
+        table.setHorizontalHeaderLabels(["Overwrite?", "Participant ID"])
+        table.horizontalHeader().setStretchLastSection(True)
+        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        
+        sorted_pids = sorted(existing_pids, key=natural_sort_key)
+        for idx, pid in enumerate(sorted_pids):
+            cb = QCheckBox()
+            cb.setChecked(True)
+            self.checkboxes[pid] = cb
+            
+            cb_container = QWidget()
+            cb_layout = QHBoxLayout(cb_container)
+            cb_layout.addWidget(cb)
+            cb_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            cb_layout.setContentsMargins(0, 0, 0, 0)
+            
+            table.setCellWidget(idx, 0, cb_container)
+            
+            pid_item = QTableWidgetItem(pid)
+            pid_item.setFlags(pid_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            table.setItem(idx, 1, pid_item)
+            
+        layout.addWidget(table)
+        
+        action_layout = QHBoxLayout()
+        confirm_btn = QPushButton("Confirm Selection")
+        confirm_btn.setStyleSheet("font-weight: bold;")
+        cancel_btn = QPushButton("Cancel")
+        
+        confirm_btn.clicked.connect(self.accept)
+        cancel_btn.clicked.connect(self.reject)
+        
+        action_layout.addWidget(confirm_btn)
+        action_layout.addWidget(cancel_btn)
+        layout.addLayout(action_layout)
+        
+        self.setLayout(layout)
+
+    def select_all(self) -> None:
+        for cb in self.checkboxes.values():
+            cb.setChecked(True)
+
+    def deselect_all(self) -> None:
+        for cb in self.checkboxes.values():
+            cb.setChecked(False)
+
+    def get_selected_pids(self) -> List[str]:
+        return [pid for pid, cb in self.checkboxes.items() if cb.isChecked()]
 
 
 class SaveConfigWindow(QDialog):
@@ -267,7 +351,7 @@ class MainWindow(QMainWindow):
 
         edit_mapping_action: QAction = QAction("&Save/Edit Field Mapping", self)
         edit_mapping_action.triggered.connect(self.editFieldMappingFromExtraction)
-        edit_mapping_action.setToolTip("Edit friendly column header names for Excel/CSV exports")
+        edit_mapping_action.setToolTip("Edit friendly column header names for data exports")
         file_menu.addAction(edit_mapping_action)
         
         help_menu = menubar.addMenu("&HELP")
@@ -395,10 +479,10 @@ class MainWindow(QMainWindow):
         
         excel_label = QLabel("Masterfile PATH:")
         self.excel_pathset = QLabel()
-        self.excel_pathset.setToolTip("Destination Excel (.xlsx / .xls) or CSV (.csv) file.")
+        self.excel_pathset.setToolTip("Destination masterfile: Parquet (.parquet), Excel (.xlsx/.xls), CSV (.csv), TSV (.tsv), or JSON (.json).")
         excel_pathbut = QPushButton("Search")
-        excel_pathbut.setToolTip("Select or create your master spreadsheet.")
-        excel_pathbut.setWhatsThis("Choose your masterfile. Data from questionnaires will be written into dedicated sheets (Excel) or CSV files.")
+        excel_pathbut.setToolTip("Select or create your masterfile.")
+        excel_pathbut.setWhatsThis("Choose your masterfile. Data from questionnaires will be written into dedicated sheets or partitioned files.")
         excel_pathbut.clicked.connect(self.select_excel_file)
         
         extract_layout.addWidget(extract_title, 0, 0, 1, 3)
@@ -426,8 +510,8 @@ class MainWindow(QMainWindow):
         
         self.extract_button = QPushButton("Extract Data to Masterfile")
         self.extract_button.setStyleSheet("font-weight: bold; padding: 10px;")
-        self.extract_button.setToolTip("Read PDF answers from completed participant folders into your Excel or CSV masterfile.")
-        self.extract_button.setWhatsThis("Reads form field values from completed surveys in the Source folder and appends them to your masterfile.")
+        self.extract_button.setToolTip("Read PDF answers from completed participant folders into your masterfile.")
+        self.extract_button.setWhatsThis("Reads form field values from completed surveys in the Source folder and appends or updates your masterfile.")
         self.extract_button.clicked.connect(self.extract_data)
 
         action_layout.addWidget(self.generate_button)
@@ -533,10 +617,16 @@ class MainWindow(QMainWindow):
             self.source_pathset.setText(folder_path)
     
     def select_excel_file(self) -> None:
-        if file_path := QFileDialog.getOpenFileName(
-            self, "Select Masterfile", "", 
-            "All Supported (*.csv *.xls *.xlsx);;CSV Files (*.csv);;Excel Files (*.xls *.xlsx);;All Files (*.*)"
-        )[0]:
+        file_filter = (
+            "All Supported (*.parquet *.xlsx *.xls *.csv *.tsv *.json);;"
+            "Parquet Files (*.parquet);;"
+            "Excel Files (*.xlsx *.xls);;"
+            "CSV Files (*.csv);;"
+            "TSV Files (*.tsv *.tab);;"
+            "JSON Files (*.json);;"
+            "All Files (*.*)"
+        )
+        if file_path := QFileDialog.getOpenFileName(self, "Select Masterfile", "", file_filter)[0]:
             self.excel_path = file_path
             self.excel_pathset.setText(file_path)
 
@@ -546,6 +636,102 @@ class MainWindow(QMainWindow):
         else:
             pid = self.nameset.text().strip()
             return [pid] if pid else []
+
+    def _get_existing_masterfile_pids(self) -> Set[str]:
+        """Detect existing participant IDs already saved in Excel, Parquet, CSV, TSV, or JSON masterfiles."""
+        if not self.excel_path or not os.path.exists(self.excel_path):
+            return set()
+
+        file_ext = self.excel_path.lower().split('.')[-1]
+        existing_pids: Set[str] = set()
+        base_dir = os.path.dirname(self.excel_path)
+        base_name = os.path.splitext(os.path.basename(self.excel_path))[0]
+
+        if file_ext in ['xls', 'xlsx']:
+            try:
+                wb: xlw.Book = xlw.Book(self.excel_path)
+                try:
+                    for sheet in wb.sheets:
+                        r = 2
+                        while True:
+                            cell_val = sheet.range(f'A{r}').value
+                            if cell_val is None:
+                                break
+                            cell_str = str(cell_val).strip()
+                            if cell_str:
+                                existing_pids.add(cell_str)
+                            r += 1
+                finally:
+                    wb.close()
+            except Exception:
+                pass
+
+        elif file_ext == 'parquet':
+            candidate_files = [
+                os.path.join(base_dir, f) for f in os.listdir(base_dir)
+                if f.lower().endswith('.parquet') and f.startswith(base_name)
+            ]
+            if not candidate_files and os.path.exists(self.excel_path):
+                candidate_files = [self.excel_path]
+
+            for c_path in candidate_files:
+                try:
+                    if HAS_PYARROW:
+                        table = pq.read_table(c_path, columns=['participant_id'])
+                        for val in table['participant_id'].to_pylist():
+                            if val is not None and str(val).strip():
+                                existing_pids.add(str(val).strip())
+                    elif HAS_PANDAS:
+                        df = pd.read_parquet(c_path, columns=['participant_id'])
+                        for val in df['participant_id'].dropna().astype(str):
+                            if val.strip():
+                                existing_pids.add(val.strip())
+                except Exception:
+                    pass
+
+        elif file_ext in ['csv', 'tsv', 'tab']:
+            delim = '\t' if file_ext in ['tsv', 'tab'] else ','
+            candidate_files = [
+                os.path.join(base_dir, f) for f in os.listdir(base_dir)
+                if f.lower().endswith(f'.{file_ext}') and f.startswith(base_name)
+            ]
+            if not candidate_files and os.path.exists(self.excel_path):
+                candidate_files = [self.excel_path]
+
+            for c_path in candidate_files:
+                try:
+                    with open(c_path, 'r', newline='', encoding='utf-8') as f:
+                        reader = csv.DictReader(f, delimiter=delim)
+                        if reader.fieldnames and 'participant_id' in reader.fieldnames:
+                            for row in reader:
+                                pid = str(row.get('participant_id', '')).strip()
+                                if pid:
+                                    existing_pids.add(pid)
+                except Exception:
+                    pass
+
+        elif file_ext == 'json':
+            candidate_files = [
+                os.path.join(base_dir, f) for f in os.listdir(base_dir)
+                if f.lower().endswith('.json') and f.startswith(base_name)
+            ]
+            if not candidate_files and os.path.exists(self.excel_path):
+                candidate_files = [self.excel_path]
+
+            for c_path in candidate_files:
+                try:
+                    with open(c_path, 'r', encoding='utf-8') as f:
+                        raw = json.load(f)
+                        if isinstance(raw, list):
+                            for item in raw:
+                                if isinstance(item, dict) and 'participant_id' in item:
+                                    pid = str(item['participant_id']).strip()
+                                    if pid:
+                                        existing_pids.add(pid)
+                except Exception:
+                    pass
+
+        return existing_pids
     
     def generate_participant_folder(self) -> None:
         try:
@@ -557,18 +743,41 @@ class MainWindow(QMainWindow):
             if not self.questionnaire_rows:
                 return self.error_window("Please configure questionnaires! (Expand 'Configuration Settings' to set templates)")
 
-            all_generated_pdf_paths: Dict[str, List[str]] = {}
-            for pid in participant_ids:
-                participant_folder = os.path.join(self.target_path, pid)
-                if os.path.exists(participant_folder):
-                    shutil.rmtree(participant_folder)
-                os.makedirs(participant_folder)
+            # Check which participant folders already exist
+            existing_pids = [
+                pid for pid in participant_ids 
+                if os.path.exists(os.path.join(self.target_path, pid))
+            ]
 
-                generated_pdf_paths: List[str] = []
+            pids_to_process = list(participant_ids)
+            if existing_pids:
+                dlg = OverwriteResolutionDialog(
+                    existing_pids=existing_pids,
+                    title="Participant Folder(s) Already Exist",
+                    prompt="The following participant folder(s) already exist in the target directory.\n"
+                           "Tick the participants you wish to overwrite (unticked will be skipped):",
+                    parent=self
+                )
+                if dlg.exec() != QDialog.DialogCode.Accepted:
+                    return  # User canceled safely
+                
+                approved_overwrite = set(dlg.get_selected_pids())
+                pids_to_process = [
+                    pid for pid in participant_ids 
+                    if (pid not in existing_pids) or (pid in approved_overwrite)
+                ]
+
+            if not pids_to_process:
+                QMessageBox.information(self, "No Changes", "No participant folders selected to generate.")
+                return
+
+            # Prepare staging data for the prefill dialog without wiping folders prematurely
+            all_generated_pdf_meta: Dict[str, List[Tuple[str, str]]] = {}
+            for pid in pids_to_process:
+                surveys_meta: List[Tuple[str, str]] = []
                 for row in self.questionnaire_rows:
                     if not row.template_path:
                         continue
-                    
                     survey_name = row.name_edit.text().strip() or f"survey_{row.index + 1}"
                     try:
                         copy_count = int(row.count_edit.text())
@@ -577,27 +786,35 @@ class MainWindow(QMainWindow):
                     
                     _, ext = os.path.splitext(os.path.basename(row.template_path))
                     for i in range(copy_count):
-                        new_filename = f"{pid}_{survey_name}{ext}" if copy_count == 1 else f"{pid}_{survey_name}{i + 1}{ext}"
-                        dest_path = os.path.join(participant_folder, new_filename)
-                        shutil.copy2(row.template_path, dest_path)
-                        if ext.lower() == '.pdf':
-                            generated_pdf_paths.append(dest_path)
-                
-                if generated_pdf_paths:
-                    all_generated_pdf_paths[pid] = generated_pdf_paths
+                        filename = f"{pid}_{survey_name}{ext}" if copy_count == 1 else f"{pid}_{survey_name}{i + 1}{ext}"
+                        surveys_meta.append((filename, row.template_path))
+                if surveys_meta:
+                    all_generated_pdf_meta[pid] = surveys_meta
 
-            if all_generated_pdf_paths:
-                self.field_mapping = self._ensure_or_create_field_mapping()
-                apply_prefill, batch_prefill_map = self.showBatchGenerationPrefillDialog(all_generated_pdf_paths)
-                if not apply_prefill:
-                    return
-                for pdf_path, field_values in batch_prefill_map.items():
-                    if field_values:
-                        self._write_pdf_form_fields(pdf_path, field_values)
+            self.field_mapping = self._ensure_or_create_field_mapping()
+            apply_prefill, batch_prefill_map = self.showBatchGenerationPrefillDialogMeta(all_generated_pdf_meta)
+            if not apply_prefill:
+                return
+
+            # Confirmed: safely create/overwrite folders and write field values
+            for pid in pids_to_process:
+                participant_folder = os.path.join(self.target_path, pid)
+                if os.path.exists(participant_folder):
+                    shutil.rmtree(participant_folder)
+                os.makedirs(participant_folder, exist_ok=True)
+
+                for filename, template_path in all_generated_pdf_meta.get(pid, []):
+                    dest_path = os.path.join(participant_folder, filename)
+                    shutil.copy2(template_path, dest_path)
+                    
+                    lookup_key = f"{pid}::{filename}"
+                    field_vals = batch_prefill_map.get(lookup_key, {})
+                    if field_vals:
+                        self._write_pdf_form_fields(dest_path, field_vals)
 
             QMessageBox.information(
                 self, "Success",
-                f"Successfully generated folders and questionnaires for {len(participant_ids)} participant(s)!"
+                f"Successfully generated folders and questionnaires for {len(pids_to_process)} participant(s)!"
             )
         except Exception as e:
             self.error_window(f"Error generating folder(s): {str(e)}")
@@ -775,14 +992,15 @@ class MainWindow(QMainWindow):
                 defaults[field_name] = participant_id
         return defaults
 
-    def showBatchGenerationPrefillDialog(self, all_generated_pdf_paths: Dict[str, List[str]]) -> tuple[bool, Dict[str, Dict[str, Any]]]:
+    def showBatchGenerationPrefillDialogMeta(self, all_generated_pdf_meta: Dict[str, List[Tuple[str, str]]]) -> Tuple[bool, Dict[str, Dict[str, Any]]]:
+        """Presents prefill table reading directly from templates before files are copied to disk."""
         dialog = QDialog(self)
         dialog.setWindowTitle("Consolidated Batch Preview & Generation")
         dialog.setModal(True)
-        dialog.resize(900, 650)
+        dialog.resize(920, 650)
 
         layout = QVBoxLayout()
-        label = QLabel(f"Preview & Edit Data for {len(all_generated_pdf_paths)} Participant(s)")
+        label = QLabel(f"Preview & Edit Data for {len(all_generated_pdf_meta)} Participant(s)")
         label.setStyleSheet("font-weight: bold; font-size: 14px;")
         layout.addWidget(label)
 
@@ -790,30 +1008,33 @@ class MainWindow(QMainWindow):
         table.setColumnCount(4)
         table.setHorizontalHeaderLabels(["Participant ID", "File", "Field", "Data"])
 
-        rows: List[tuple[str, str, str, str, str]] = []
-        file_to_path: Dict[str, str] = {}
+        rows: List[Tuple[str, str, str, str, str]] = []
         file_to_extracted_fields: Dict[str, Dict[str, str]] = {}
+        template_cache: Dict[str, Dict[str, str]] = {}
         
         root_order = self.get_configured_root_order()
 
-        for participant_id, pdf_paths in all_generated_pdf_paths.items():
-            sorted_pdf_paths = sorted(
-                pdf_paths,
-                key=lambda p: (
-                    root_order.index(self._get_root_survey_name(os.path.splitext(os.path.basename(p))[0].replace(f'{participant_id}_', '', 1)))
-                    if self._get_root_survey_name(os.path.splitext(os.path.basename(p))[0].replace(f'{participant_id}_', '', 1)) in root_order
+        for participant_id, meta_list in all_generated_pdf_meta.items():
+            sorted_meta = sorted(
+                meta_list,
+                key=lambda m: (
+                    root_order.index(self._get_root_survey_name(os.path.splitext(m[0])[0].replace(f'{participant_id}_', '', 1)))
+                    if self._get_root_survey_name(os.path.splitext(m[0])[0].replace(f'{participant_id}_', '', 1)) in root_order
                     else 9999,
-                    natural_sort_key(os.path.basename(p))
+                    natural_sort_key(m[0])
                 )
             )
 
-            for pdf_path in sorted_pdf_paths:
-                file_label = os.path.basename(pdf_path)
-                file_to_path[f"{participant_id}::{file_label}"] = pdf_path
+            for file_label, template_path in sorted_meta:
                 survey_type = os.path.splitext(file_label)[0].replace(f'{participant_id}_', '', 1)
-                extracted_fields = self._extract_pdf_form_fields(pdf_path)
+                
+                if template_path not in template_cache:
+                    template_cache[template_path] = self._extract_pdf_form_fields(template_path)
+                extracted_fields = dict(template_cache[template_path])
+                
                 if not extracted_fields:
                     continue
+                    
                 defaults = self._build_prefill_defaults(participant_id, extracted_fields)
                 file_to_extracted_fields[f"{participant_id}::{file_label}"] = extracted_fields
 
@@ -885,9 +1106,9 @@ class MainWindow(QMainWindow):
 
         def confirm_and_close() -> None:
             prefill_values: Dict[str, Dict[str, Any]] = {}
-            for paths in all_generated_pdf_paths.values():
-                for p in paths:
-                    prefill_values[p] = {}
+            for pid, meta_list in all_generated_pdf_meta.items():
+                for f_label, _ in meta_list:
+                    prefill_values[f"{pid}::{f_label}"] = {}
             
             for row_index in range(table.rowCount()):
                 pid_item = table.item(row_index, 0)
@@ -898,7 +1119,7 @@ class MainWindow(QMainWindow):
                     continue
                 pid = pid_item.text()
                 file_name = file_item.text()
-                pdf_path = file_to_path.get(f"{pid}::{file_name}")
+                key = f"{pid}::{file_name}"
                 underlying_field_name = rows[row_index][2]
                 val = value_item.text().strip() if value_item else ""
                 
@@ -907,19 +1128,16 @@ class MainWindow(QMainWindow):
                 if new_name:
                     self.field_mapping[f"{survey_type}_{underlying_field_name}"] = new_name
 
-                if not pdf_path:
-                    continue
-
                 if underlying_field_name.startswith('Check') and '_' not in underlying_field_name:
                     base_name = underlying_field_name
-                    raw_fields = file_to_extracted_fields.get(f"{pid}::{file_name}", {})
+                    raw_fields = file_to_extracted_fields.get(key, {})
                     for raw_f in raw_fields:
                         m = CANONICAL_PATTERN.match(raw_f)
                         if m and f"Check{m.group(2)}" == base_name and m.group(3) is not None:
                             col_opt = m.group(3)
-                            prefill_values[pdf_path][raw_f] = '1' if col_opt == val else '0'
+                            prefill_values[key][raw_f] = '1' if col_opt == val else '0'
                 else:
-                    prefill_values[pdf_path][underlying_field_name] = val
+                    prefill_values[key][underlying_field_name] = val
 
             if self.active_config_name:
                 self._save_mapping_to_config(self.active_config_name, self.field_mapping)
@@ -934,7 +1152,7 @@ class MainWindow(QMainWindow):
 
         if result["action"] == "apply":
             return True, cast(Dict[str, Dict[str, Any]], result["values"])
-        raise ValueError("Generation cancelled by user")
+        return False, {}
 
     def _prepare_data_for_extraction(self, participant_id: str) -> Dict[str, Dict[str, Any]]:
         normalized_source = os.path.normpath(self.source_path)
@@ -945,7 +1163,7 @@ class MainWindow(QMainWindow):
 
         survey_files: List[str] = sorted([f for f in os.listdir(participant_folder) if f.lower().endswith('.pdf')], key=natural_sort_key)
         if not survey_files:
-            raise ValueError("No readable questionnaire data found.")
+            raise ValueError(f"No readable questionnaire data found for participant '{participant_id}'.")
 
         sheet_data: Dict[str, Dict[str, Any]] = {}
 
@@ -999,17 +1217,110 @@ class MainWindow(QMainWindow):
 
         return sheet_data
 
-    def _readout_batch(self, participant_ids: List[str]) -> None:
+    def showBatchExtractionPreviewDialog(self, all_sheet_data: Dict[str, Dict[str, Dict[str, Any]]]) -> Tuple[bool, Dict[str, Dict[str, Dict[str, Any]]]]:
+        """Displays all extracted participants in one unified editable preview dialog before writing."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Preview Masterfile Extraction")
+        dialog.setModal(True)
+        dialog.resize(920, 650)
+        
+        layout = QVBoxLayout()
+        label = QLabel(f"Preview & Verify Extraction Data for {len(all_sheet_data)} Participant(s)")
+        label.setStyleSheet("font-weight: bold; font-size: 14px;")
+        layout.addWidget(label)
+        
+        root_order = self.get_configured_root_order()
+
+        flat_rows: List[Tuple[str, str, str, str, str]] = []
+        for pid in sorted(all_sheet_data.keys(), key=natural_sort_key):
+            sheets_map = all_sheet_data[pid]
+            sorted_sheet_names = sorted(
+                sheets_map.keys(),
+                key=lambda s: (root_order.index(s) if s in root_order else 9999, natural_sort_key(s))
+            )
+            for sheet_name in sorted_sheet_names:
+                data = sheets_map[sheet_name]
+                sorted_fields = sorted([k for k in data.keys() if k != 'participant_id'], key=natural_sort_key)
+                for k in sorted_fields:
+                    v = data[k]
+                    mapped_name = self.field_mapping.get(k, self.field_mapping.get(f"{sheet_name}_{k}", k))
+                    flat_rows.append((pid, sheet_name, k, mapped_name, str(v)))
+
+        table = QTableWidget(len(flat_rows), 5)
+        table.setHorizontalHeaderLabels(["Participant ID", "Sheet", "Field", "Column Name", "Data"])
+        
+        for idx, (pid, s_name, f_key, m_name, val) in enumerate(flat_rows):
+            pi = QTableWidgetItem(pid)
+            pi.setFlags(pi.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            si = QTableWidgetItem(s_name)
+            si.setFlags(si.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            fi = QTableWidgetItem(f_key)
+            fi.setFlags(fi.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            ni = QTableWidgetItem(m_name)
+            ni.setFlags(ni.flags() | Qt.ItemFlag.ItemIsEditable)
+            di = QTableWidgetItem(val)
+            di.setFlags(di.flags() | Qt.ItemFlag.ItemIsEditable)
+
+            table.setItem(idx, 0, pi)
+            table.setItem(idx, 1, si)
+            table.setItem(idx, 2, fi)
+            table.setItem(idx, 3, ni)
+            table.setItem(idx, 4, di)
+        
+        table.horizontalHeader().setStretchLastSection(True)
+        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        layout.addWidget(table)
+        
+        btn_layout = QHBoxLayout()
+        c_btn = QPushButton("Confirm and Extract All")
+        c_btn.setStyleSheet("font-weight: bold;")
+        can_btn = QPushButton("Cancel")
+        btn_layout.addWidget(c_btn)
+        btn_layout.addWidget(can_btn)
+        layout.addLayout(btn_layout)
+        dialog.setLayout(layout)
+        
+        result = [False]
+        edited_output: Dict[str, Dict[str, Dict[str, Any]]] = {}
+        for pid, s_map in all_sheet_data.items():
+            edited_output[pid] = {s: {'participant_id': pid} for s in s_map}
+        
+        def save_and_close() -> None:
+            for r in range(table.rowCount()):
+                pid = table.item(r, 0).text()
+                s = table.item(r, 1).text()
+                k = table.item(r, 2).text()
+                new_n = table.item(r, 3).text().strip() if table.item(r, 3) else ""
+                val = table.item(r, 4).text() if table.item(r, 4) else ""
+                
+                edited_output.setdefault(pid, {}).setdefault(s, {'participant_id': pid})[k] = val
+                if new_n:
+                    self.field_mapping[k] = new_n
+                    self.field_mapping[f"{s}_{k}"] = new_n
+
+            if self.active_config_name:
+                self._save_mapping_to_config(self.active_config_name, self.field_mapping)
+
+            result[0] = True
+            dialog.accept()
+        
+        c_btn.clicked.connect(save_and_close)
+        can_btn.clicked.connect(dialog.reject)
+        dialog.exec()
+        return result[0], edited_output if result[0] else all_sheet_data
+
+    def _readout_batch(self, participant_ids: List[str], all_participants_sheet_data: Dict[str, Dict[str, Dict[str, Any]]]) -> None:
+        """Writes all processed participants in a single session across Excel, Parquet, CSV, TSV, or JSON formats."""
         if not self.excel_path:
             raise ValueError("Please select a masterfile! (Expand 'Configuration Settings' to select masterfile)")
 
         file_ext = self.excel_path.lower().split('.')[-1]
         root_order = self.get_configured_root_order()
 
-        all_participants_sheet_data: Dict[str, Dict[str, Dict[str, Any]]] = {}
-        for pid in participant_ids:
-            all_participants_sheet_data[pid] = self._prepare_data_for_extraction(pid)
-
+        # ==================== EXCEL EXPORT (.xlsx / .xls) ====================
         if file_ext in ['xls', 'xlsx']:
             wb: xlw.Book = xlw.Book(self.excel_path)
             try:
@@ -1120,7 +1431,93 @@ class MainWindow(QMainWindow):
                 if 'wb' in locals():
                     wb.close()
                 raise
-        elif file_ext == 'csv':
+
+        # ==================== PARQUET EXPORT (.parquet) ====================
+        elif file_ext == 'parquet':
+            if not HAS_PYARROW and not HAS_PANDAS:
+                raise ValueError("Exporting to Parquet format requires 'pyarrow' (or 'pandas'). Please install it using: pip install pyarrow")
+
+            base_dir = os.path.dirname(self.excel_path)
+            base_name = os.path.splitext(os.path.basename(self.excel_path))[0]
+
+            # Collect unique sheet names
+            all_sheet_names: Set[str] = set()
+            for pid in participant_ids:
+                all_sheet_names.update(all_participants_sheet_data.get(pid, {}).keys())
+
+            ordered_sheet_names = sorted(
+                all_sheet_names,
+                key=lambda s: (root_order.index(s) if s in root_order else 9999, natural_sort_key(s))
+            )
+
+            for sheet_name in ordered_sheet_names:
+                target_parquet = os.path.join(base_dir, f"{base_name}_{sheet_name}.parquet")
+                existing_rows: List[Dict[str, Any]] = []
+
+                if os.path.exists(target_parquet):
+                    try:
+                        if HAS_PYARROW:
+                            existing_rows = pq.read_table(target_parquet).to_pylist()
+                        elif HAS_PANDAS:
+                            existing_rows = pd.read_parquet(target_parquet).to_dict(orient='records')
+                    except Exception:
+                        existing_rows = []
+
+                # Merge/Overwrite rows for incoming participants
+                for pid in participant_ids:
+                    raw_data = all_participants_sheet_data.get(pid, {}).get(sheet_name)
+                    if not raw_data:
+                        continue
+
+                    export_data: Dict[str, Any] = {'participant_id': pid}
+                    sorted_field_keys = sorted(
+                        [k for k in raw_data.keys() if k != 'participant_id'],
+                        key=natural_sort_key
+                    )
+                    for k in sorted_field_keys:
+                        mapped_k = self.field_mapping.get(k)
+                        if not mapped_k:
+                            mapped_k = self.field_mapping.get(f"{sheet_name}_{k}")
+                        if not mapped_k:
+                            for map_k, map_v in self.field_mapping.items():
+                                if k.endswith(f"_{map_k}") or map_k.endswith(f"_{k}"):
+                                    mapped_k = map_v
+                                    break
+                        export_data[mapped_k or k] = raw_data[k]
+
+                    existing_index = -1
+                    for idx, row in enumerate(existing_rows):
+                        if str(row.get('participant_id', '')).strip() == str(pid):
+                            existing_index = idx
+                            break
+
+                    if existing_index != -1:
+                        existing_rows[existing_index].update(export_data)
+                    else:
+                        existing_rows.append(export_data)
+
+                if existing_rows:
+                    all_cols = ['participant_id']
+                    for r in existing_rows:
+                        for c in r.keys():
+                            if c not in all_cols:
+                                all_cols.append(c)
+
+                    normalized_rows = [
+                        {c: str(r.get(c, '')) if r.get(c) is not None else '' for c in all_cols}
+                        for r in existing_rows
+                    ]
+
+                    if HAS_PYARROW:
+                        pa_table = pa.Table.from_pylist(normalized_rows)
+                        pq.write_table(pa_table, target_parquet)
+                    elif HAS_PANDAS:
+                        df = pd.DataFrame(normalized_rows)
+                        df.to_parquet(target_parquet, index=False)
+
+        # ==================== DELIMITED TEXT EXPORT (.csv / .tsv / .tab) ====================
+        elif file_ext in ['csv', 'tsv', 'tab']:
+            delim = '\t' if file_ext in ['tsv', 'tab'] else ','
             base_dir = os.path.dirname(self.excel_path)
             base_name = os.path.splitext(os.path.basename(self.excel_path))[0]
             
@@ -1133,8 +1530,8 @@ class MainWindow(QMainWindow):
 
                 for sheet_name in ordered_sheet_names:
                     raw_data = sheet_data[sheet_name]
-                    target_csv = os.path.join(base_dir, f"{base_name}_{sheet_name}.csv")
-                    file_exists = os.path.exists(target_csv) and os.path.getsize(target_csv) > 0
+                    target_file = os.path.join(base_dir, f"{base_name}_{sheet_name}.{file_ext}")
+                    file_exists = os.path.exists(target_file) and os.path.getsize(target_file) > 0
 
                     export_data = {'participant_id': pid}
                     sorted_field_keys = sorted(
@@ -1147,7 +1544,7 @@ class MainWindow(QMainWindow):
                             mapped_k = self.field_mapping.get(f"{sheet_name}_{k}")
                         if not mapped_k:
                             for map_k, map_v in self.field_mapping.items():
-                                if k.endswith(f"_{map_k}") or map_k.endswith(f"_{key}"):
+                                if k.endswith(f"_{map_k}") or map_k.endswith(f"_{k}"):
                                     mapped_k = map_v
                                     break
                         export_data[mapped_k or k] = raw_data[k]
@@ -1155,8 +1552,8 @@ class MainWindow(QMainWindow):
                     existing_headers: List[str] = []
                     existing_rows: List[Dict[str, Any]] = []
                     if file_exists:
-                        with open(target_csv, 'r', newline='', encoding='utf-8') as f:
-                            reader = csv.DictReader(f)
+                        with open(target_file, 'r', newline='', encoding='utf-8') as f:
+                            reader = csv.DictReader(f, delimiter=delim)
                             existing_headers = list(reader.fieldnames) if reader.fieldnames else []
                             existing_rows = list(reader)
 
@@ -1167,17 +1564,74 @@ class MainWindow(QMainWindow):
                             break
 
                     if existing_index != -1:
-                        existing_rows[existing_index] = export_data
+                        existing_rows[existing_index].update(export_data)
                     else:
                         existing_rows.append(export_data)
 
                     new_headers = [k for k in export_data.keys() if k not in existing_headers]
                     all_headers = existing_headers + new_headers if existing_headers else list(export_data.keys())
 
-                    with open(target_csv, 'w', newline='', encoding='utf-8') as f:
-                        writer = csv.DictWriter(f, fieldnames=all_headers)
+                    with open(target_file, 'w', newline='', encoding='utf-8') as f:
+                        writer = csv.DictWriter(f, fieldnames=all_headers, delimiter=delim)
                         writer.writeheader()
                         writer.writerows(existing_rows)
+
+        # ==================== JSON EXPORT (.json) ====================
+        elif file_ext == 'json':
+            base_dir = os.path.dirname(self.excel_path)
+            base_name = os.path.splitext(os.path.basename(self.excel_path))[0]
+
+            for pid in participant_ids:
+                sheet_data = all_participants_sheet_data.get(pid, {})
+                ordered_sheet_names = sorted(
+                    sheet_data.keys(),
+                    key=lambda s: (root_order.index(s) if s in root_order else 9999, natural_sort_key(s))
+                )
+
+                for sheet_name in ordered_sheet_names:
+                    raw_data = sheet_data[sheet_name]
+                    target_json = os.path.join(base_dir, f"{base_name}_{sheet_name}.json")
+                    
+                    existing_rows = []
+                    if os.path.exists(target_json):
+                        try:
+                            with open(target_json, 'r', encoding='utf-8') as f:
+                                loaded = json.load(f)
+                                if isinstance(loaded, list):
+                                    existing_rows = loaded
+                        except Exception:
+                            existing_rows = []
+
+                    export_data = {'participant_id': pid}
+                    sorted_field_keys = sorted(
+                        [k for k in raw_data.keys() if k != 'participant_id'],
+                        key=natural_sort_key
+                    )
+                    for k in sorted_field_keys:
+                        mapped_k = self.field_mapping.get(k)
+                        if not mapped_k:
+                            mapped_k = self.field_mapping.get(f"{sheet_name}_{k}")
+                        if not mapped_k:
+                            for map_k, map_v in self.field_mapping.items():
+                                if k.endswith(f"_{map_k}") or map_k.endswith(f"_{k}"):
+                                    mapped_k = map_v
+                                    break
+                        export_data[mapped_k or k] = raw_data[k]
+
+                    existing_index = -1
+                    for idx, row in enumerate(existing_rows):
+                        if row.get('participant_id') == pid:
+                            existing_index = idx
+                            break
+
+                    if existing_index != -1:
+                        existing_rows[existing_index].update(export_data)
+                    else:
+                        existing_rows.append(export_data)
+
+                    with open(target_json, 'w', encoding='utf-8') as f:
+                        json.dump(existing_rows, f, indent=2, ensure_ascii=False)
+
         else:
             raise ValueError(f"Unsupported masterfile format: {file_ext}")
 
@@ -1193,105 +1647,50 @@ class MainWindow(QMainWindow):
             return self.error_window("Please enter at least one participant ID!")
 
         try:
-            if len(participant_ids) > 1 or self.batch_mode_global.isChecked():
-                self._readout_batch(participant_ids)
-                QMessageBox.information(self, "Batch Extraction Complete", f"Successfully extracted {len(participant_ids)} participant(s) into masterfile!")
-            else:
-                participant_id = participant_ids[0]
-                sheet_data = self._prepare_data_for_extraction(participant_id)
-                confirmed, edited_sheet_data = self.showPreviewDialog(participant_id, sheet_data)
-                if not confirmed:
-                    return
-                self._readout_batch([participant_id])
-                QMessageBox.information(self, "Success", f"Data extracted successfully into sheets for {participant_id}!")
+            # 1. Detect existing participants in the masterfile
+            existing_masterfile_pids = self._get_existing_masterfile_pids()
+            conflicting_pids = [pid for pid in participant_ids if pid in existing_masterfile_pids]
+
+            pids_to_extract = list(participant_ids)
+            if conflicting_pids:
+                dlg = OverwriteResolutionDialog(
+                    existing_pids=conflicting_pids,
+                    title="Masterfile Records Already Exist",
+                    prompt="The following participant(s) already exist in your masterfile.\n"
+                           "Tick the participants you wish to overwrite (unticked will be skipped):",
+                    parent=self
+                )
+                if dlg.exec() != QDialog.DialogCode.Accepted:
+                    return  # User canceled safely
+                
+                approved_overwrite = set(dlg.get_selected_pids())
+                pids_to_extract = [
+                    pid for pid in participant_ids 
+                    if (pid not in conflicting_pids) or (pid in approved_overwrite)
+                ]
+
+            if not pids_to_extract:
+                QMessageBox.information(self, "No Changes", "No participants selected to extract.")
+                return
+
+            # 2. Extract questionnaire data into memory
+            all_sheet_data: Dict[str, Dict[str, Dict[str, Any]]] = {}
+            for pid in pids_to_extract:
+                all_sheet_data[pid] = self._prepare_data_for_extraction(pid)
+
+            # 3. Present unified batch extraction preview dialog
+            confirmed, edited_data = self.showBatchExtractionPreviewDialog(all_sheet_data)
+            if not confirmed:
+                return
+
+            # 4. Commit all extracted data to masterfile in one single pass
+            self._readout_batch(pids_to_extract, edited_data)
+            QMessageBox.information(
+                self, "Extraction Complete", 
+                f"Successfully extracted {len(pids_to_extract)} participant(s) into masterfile!"
+            )
         except Exception as e:
             self.error_window(f"Error extracting data: {str(e)}")
-
-    def showPreviewDialog(self, participant_id: str, sheet_data: Dict[str, Dict[str, Any]]) -> Tuple[bool, Dict[str, Dict[str, Any]]]:
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Preview Data Extraction")
-        dialog.setModal(True)
-        dialog.resize(850, 600)
-        
-        layout = QVBoxLayout()
-        label = QLabel(f"Preview data for participant: {participant_id}")
-        label.setStyleSheet("font-weight: bold; font-size: 14px;")
-        layout.addWidget(label)
-        
-        root_order = self.get_configured_root_order()
-        sorted_sheet_names = sorted(
-            sheet_data.keys(),
-            key=lambda s: (root_order.index(s) if s in root_order else 9999, natural_sort_key(s))
-        )
-
-        flat_rows: List[Tuple[str, str, str, str]] = []
-        for sheet_name in sorted_sheet_names:
-            data = sheet_data[sheet_name]
-            sorted_fields = sorted([k for k in data.keys() if k != 'participant_id'], key=natural_sort_key)
-            for k in sorted_fields:
-                v = data[k]
-                mapped_name = self.field_mapping.get(k, self.field_mapping.get(f"{sheet_name}_{k}", k))
-                flat_rows.append((sheet_name, k, mapped_name, str(v)))
-
-        table = QTableWidget()
-        table.setColumnCount(4)
-        table.setHorizontalHeaderLabels(["Sheet", "Field", "Name", "Data"])
-        table.setRowCount(len(flat_rows))
-        
-        for idx, (s_name, f_key, m_name, val) in enumerate(flat_rows):
-            si = QTableWidgetItem(s_name)
-            si.setFlags(si.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            fi = QTableWidgetItem(f_key)
-            fi.setFlags(fi.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            ni = QTableWidgetItem(m_name)
-            ni.setFlags(ni.flags() | Qt.ItemFlag.ItemIsEditable)
-            di = QTableWidgetItem(val)
-            di.setFlags(di.flags() | Qt.ItemFlag.ItemIsEditable)
-
-            table.setItem(idx, 0, si)
-            table.setItem(idx, 1, fi)
-            table.setItem(idx, 2, ni)
-            table.setItem(idx, 3, di)
-        
-        table.horizontalHeader().setStretchLastSection(True)
-        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        layout.addWidget(table)
-        
-        btn_layout = QHBoxLayout()
-        c_btn = QPushButton("Confirm and Extract")
-        can_btn = QPushButton("Cancel")
-        btn_layout.addWidget(c_btn)
-        btn_layout.addWidget(can_btn)
-        layout.addLayout(btn_layout)
-        dialog.setLayout(layout)
-        
-        result = [False]
-        edited_output: Dict[str, Dict[str, Any]] = {s: {'participant_id': participant_id} for s in sheet_data}
-        
-        def save_and_close() -> None:
-            for r in range(table.rowCount()):
-                s = table.item(r, 0).text()
-                k = table.item(r, 1).text()
-                new_n = table.item(r, 2).text().strip() if table.item(r, 2) else ""
-                val = table.item(r, 3).text() if table.item(r, 3) else ""
-                
-                edited_output.setdefault(s, {'participant_id': participant_id})[k] = val
-                if new_n:
-                    self.field_mapping[k] = new_n
-                    self.field_mapping[f"{s}_{k}"] = new_n
-
-            if self.active_config_name:
-                self._save_mapping_to_config(self.active_config_name, self.field_mapping)
-
-            result[0] = True
-            dialog.accept()
-        
-        c_btn.clicked.connect(save_and_close)
-        can_btn.clicked.connect(dialog.reject)
-        dialog.exec()
-        return result[0], edited_output if result[0] else sheet_data
 
     def _get_expected_system_fields(self) -> set[str]:
         expected: set[str] = set()
@@ -1417,7 +1816,7 @@ class MainWindow(QMainWindow):
         dialog.setWindowTitle("Save/Edit Field Mapping")
         dialog.resize(750, 520)
         lay = QVBoxLayout()
-        label = QLabel("Map system field identifiers to user-friendly column headers for Excel/CSV:")
+        label = QLabel("Map system field identifiers to user-friendly column headers:")
         label.setStyleSheet("font-weight: bold;")
         lay.addWidget(label)
 
