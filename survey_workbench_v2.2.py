@@ -32,28 +32,37 @@ try:
 except ImportError:
     HAS_PANDAS = False
 
-# Canonical grammar for all survey presentations
-CANONICAL_PATTERN = re.compile(r'^(Text|Check)(\d+)(?:_(\d+))?(_n)?$', re.IGNORECASE)
+# ==============================================================================
+# CANONICAL FORM FIELD GRAMMAR:
+#   (_){Check, Text}i(_n)
+#
+#   (_)           : NOT operator. If present (leading '_'), the field is strictly
+#                   ignored and NOT exported to the masterfile.
+#   {Check, Text} : Declares entry type. 'Text' is string; 'Check' is boolean/nominal.
+#   i             : Index of the condition/question (stays constant across options n).
+#   (_n)          : Option index. When selected, the masterfile cell for column
+#                   'Check<i>' displays 'n' instead of the internal PDF value.
+#                   - Nominal/Likert: Check1_1 to Check1_5 -> selected Check1_3 yields '3'
+#                   - Binary: Check2_0 (False/No) and Check2_1 (True/Yes) yield '0' or '1'
+# ==============================================================================
+CANONICAL_PATTERN = re.compile(r'^(_)?(Text|Check)(\d+)(?:_([a-zA-Z0-9]+))?$', re.IGNORECASE)
 CONFIG_FILENAME = "survey_workbench.config"
 
 
 def get_config_path() -> str:
     """Return path to survey_workbench.config alongside executable or script."""
-    # 1. Nuitka onefile runtime environment variable (points directly to host binary directory)
     if "NUITKA_ONEFILE_DIRECTORY" in os.environ:
         base_dir = os.environ["NUITKA_ONEFILE_DIRECTORY"]
-    # 2. General compiled or frozen environment fallback (Nuitka standalone or PyInstaller)
     elif getattr(sys, 'frozen', False) or "__compiled__" in globals():
         exe_path = sys.argv[0] if sys.argv and sys.argv[0] else sys.executable
         base_dir = os.path.dirname(os.path.abspath(exe_path))
-    # 3. Direct execution from Python source
     else:
         base_dir = os.path.dirname(os.path.abspath(__file__))
     return os.path.join(base_dir, CONFIG_FILENAME)
 
 
 def ensure_config_file_exists() -> str:
-    """Ensure config file exists next to the executable/script, seeding from bundled copy if available."""
+    """Ensure config file exists next to the executable/script."""
     cfg_path = get_config_path()
     if not os.path.exists(cfg_path):
         bundled_cfg = os.path.join(os.path.dirname(os.path.abspath(__file__)), CONFIG_FILENAME)
@@ -77,7 +86,7 @@ def natural_sort_key(s: Any) -> List[Any]:
 
 
 def resolve_pdf_object(obj: Any) -> Any:
-    """Recursively resolve IndirectObject references from Acrobat, Word, and LaTeX forms."""
+    """Recursively resolve IndirectObject references from PDF forms."""
     max_depth = 10
     depth = 0
     while hasattr(obj, 'get_object') and depth < max_depth:
@@ -108,7 +117,7 @@ def find_readme_path() -> Optional[str]:
 
 
 class MarkdownManualDialog(QDialog):
-    """In-app viewer that renders README.md directly as the manual on both Windows and Linux."""
+    """In-app viewer that renders README.md directly as the manual."""
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Survey Workbench - Documentation & User Manual")
@@ -143,7 +152,6 @@ class MarkdownManualDialog(QDialog):
         close_btn = QPushButton("Close")
         close_btn.clicked.connect(self.close)
         layout.addWidget(close_btn, alignment=Qt.AlignmentFlag.AlignRight)
-        
         self.setLayout(layout)
 
 
@@ -156,7 +164,6 @@ class OverwriteResolutionDialog(QDialog):
         self.resize(520, 420)
         
         self.checkboxes: Dict[str, QCheckBox] = {}
-        
         layout = QVBoxLayout()
         
         prompt_label = QLabel(prompt)
@@ -192,7 +199,6 @@ class OverwriteResolutionDialog(QDialog):
             cb_layout.setContentsMargins(0, 0, 0, 0)
             
             table.setCellWidget(idx, 0, cb_container)
-            
             pid_item = QTableWidgetItem(pid)
             pid_item.setFlags(pid_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             table.setItem(idx, 1, pid_item)
@@ -203,14 +209,12 @@ class OverwriteResolutionDialog(QDialog):
         confirm_btn = QPushButton("Confirm Selection")
         confirm_btn.setStyleSheet("font-weight: bold;")
         cancel_btn = QPushButton("Cancel")
-        
         confirm_btn.clicked.connect(self.accept)
         cancel_btn.clicked.connect(self.reject)
         
         action_layout.addWidget(confirm_btn)
         action_layout.addWidget(cancel_btn)
         layout.addLayout(action_layout)
-        
         self.setLayout(layout)
 
     def select_all(self) -> None:
@@ -232,20 +236,17 @@ class SaveConfigWindow(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Save Configuration")
         self.setModal(True)
-        layout: QGridLayout = QGridLayout()
-        self.title3: QLabel = QLabel("Set configuration name:")
+        layout = QGridLayout()
+        self.title3 = QLabel("Set configuration name:")
         layout.addWidget(self.title3, 0, 0)
         
-        self.configset: QLineEdit = QLineEdit()
+        self.configset = QLineEdit()
         self.configset.setToolTip("Enter a unique profile name (e.g., 'Pilot_Study')")
-        self.configset.setWhatsThis(f"Enter a profile name. All target/source paths, templates, copy counts, and column field mappings will be saved under this name in {CONFIG_FILENAME}.")
+        self.configset.setWhatsThis(f"Enter a profile name. All settings will be saved in {CONFIG_FILENAME}.")
         layout.addWidget(self.configset, 0, 1)
         
-        self.save: QPushButton = QPushButton('Save configuration')
-        self.save.setToolTip("Save all settings under the specified name")
-        self.save.setWhatsThis(f"Click to commit and save the current configuration profile to {CONFIG_FILENAME}.")
+        self.save = QPushButton('Save configuration')
         layout.addWidget(self.save, 1, 1)
-        
         self.setLayout(layout)
         self.save.clicked.connect(self.troubleshoot)
         
@@ -276,27 +277,19 @@ class SaveConfigWindow(QDialog):
 
 
 class QuestionnaireRow:
-    """Represents a single questionnaire configuration row with help hints."""
+    """Represents a single questionnaire configuration row."""
     def __init__(self, index: int) -> None:
         self.index: int = index
         self.name_label: QLabel = QLabel(f"Survey {index + 1} name:")
         self.name_edit: QLineEdit = QLineEdit()
         self.name_edit.setToolTip("Short name for this survey (e.g., 'Demographics', 'NASA_TLX')")
-        self.name_edit.setWhatsThis("Used to rename the generated PDF files and serves as the Excel sheet / tab name during extraction.")
         
         self.path_label: QLabel = QLabel("Template PATH:")
         self.path_display: QLabel = QLabel()
-        self.path_display.setToolTip("Path to the selected PDF form template")
-        
         self.path_button: QPushButton = QPushButton("Search")
-        self.path_button.setToolTip("Select master fillable PDF template")
-        self.path_button.setWhatsThis("Open a file dialog to choose the fillable master PDF form template for this questionnaire.")
         
         self.count_label: QLabel = QLabel("Number of copies:")
         self.count_edit: QLineEdit = QLineEdit("1")
-        self.count_edit.setToolTip("How many copies of this survey each participant receives (e.g., repeated trials)")
-        self.count_edit.setWhatsThis("If a survey is taken multiple times per participant (e.g., across multiple blocks), enter the count here.")
-        
         self.template_path: str = ""
         
     def get_widgets(self) -> List[QWidget]:
@@ -324,20 +317,16 @@ class MainWindow(QMainWindow):
         
         # Menu Actions
         button_action: QAction = QAction("&Save Configuration", self)
-        button_action.setToolTip(f"Save folder paths, surveys, and column mappings to {CONFIG_FILENAME}")
         button_action.triggered.connect(self.showSaveConfigWindow)
         
         button_action3: QAction = QAction("User Manual", self)
-        button_action3.setToolTip("Open the built-in documentation and user manual")
         button_action3.triggered.connect(self.openUserManual)
         
         whats_this_action: QAction = QAction("What's This? (Click for Help)", self)
-        whats_this_action.setToolTip("Turn the mouse into a help cursor, then click any item to learn about it.")
         whats_this_action.triggered.connect(self.enterWhatsThisMode)
         whats_this_action.setShortcut("Shift+F1")
         
         self.setStatusBar(QStatusBar(self))
-
         menubar = self.menuBar()
         assert menubar is not None
         file_menu = menubar.addMenu("&File")
@@ -351,7 +340,6 @@ class MainWindow(QMainWindow):
 
         edit_mapping_action: QAction = QAction("&Save/Edit Field Mapping", self)
         edit_mapping_action.triggered.connect(self.editFieldMappingFromExtraction)
-        edit_mapping_action.setToolTip("Edit friendly column header names for data exports")
         file_menu.addAction(edit_mapping_action)
         
         help_menu = menubar.addMenu("&HELP")
@@ -359,8 +347,8 @@ class MainWindow(QMainWindow):
         help_menu.addAction(whats_this_action)
         help_menu.addAction(button_action3)
         
-        # ========== PARTICIPANT DECLARATION SECTION ==========
-        part_frame: QFrame = QFrame()
+        # Participant Declaration
+        part_frame = QFrame()
         part_frame.setFrameStyle(QFrame.Shape.Box | QFrame.Shadow.Raised)
         part_layout = QGridLayout()
         
@@ -371,22 +359,15 @@ class MainWindow(QMainWindow):
         part_label.setStyleSheet("font-weight: bold")
         self.nameset = QLineEdit()
         self.nameset.setToolTip("Enter a single participant ID (e.g., P001).")
-        self.nameset.setWhatsThis("Type the unique identifier for a single participant. A dedicated subfolder with this name will be created inside the target folder.")
         
         self.batch_mode_global = QCheckBox("Batch Mode (multiple IDs)")
-        self.batch_mode_global.setToolTip("Check this box to input or import multiple participant IDs simultaneously.")
-        self.batch_mode_global.setWhatsThis("Enables Batch Mode. When checked, you can enter multiple IDs (one per line or comma-separated) or import them from a .txt or .csv list.")
         self.batch_mode_global.toggled.connect(self.toggleBatchModeGlobal)
         
         import_list_btn = QPushButton("Import List...")
-        import_list_btn.setToolTip("Load a text (.txt) or CSV (.csv) file containing participant IDs.")
-        import_list_btn.setWhatsThis("Open a file dialog to load participant IDs from an external plain text or CSV file.")
         import_list_btn.clicked.connect(lambda: self.importParticipantList(self.batch_text_global))
         
         self.batch_text_global = QTextEdit()
         self.batch_text_global.setPlaceholderText("Enter participant IDs (one per line or comma-separated):\nP001\nP002\nP003")
-        self.batch_text_global.setToolTip("Enter multiple participant IDs, one per line or separated by commas.")
-        self.batch_text_global.setWhatsThis("Type or paste multiple participant IDs. Folder generation and data extraction will automatically iterate through all listed IDs in a single session.")
         self.batch_text_global.setVisible(False)
         self.batch_text_global.setMaximumHeight(80)
         
@@ -396,19 +377,16 @@ class MainWindow(QMainWindow):
         part_layout.addWidget(self.batch_mode_global, 1, 2)
         part_layout.addWidget(import_list_btn, 2, 2)
         part_layout.addWidget(self.batch_text_global, 2, 0, 1, 2)
-        
         part_frame.setLayout(part_layout)
         main_layout.addWidget(part_frame)
 
-        # ========== COLLAPSIBLE CONFIGURATION CONTAINER ==========
+        # Configuration Container
         self.toggle_config_btn = QToolButton()
         self.toggle_config_btn.setText("▶ Configuration Settings")
         self.toggle_config_btn.setStyleSheet("font-weight: bold; border: none; text-align: left; padding: 5px;")
         self.toggle_config_btn.setCheckable(True)
         self.toggle_config_btn.setChecked(False)
         self.toggle_config_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-        self.toggle_config_btn.setToolTip("Click to expand or collapse study setup paths and questionnaire templates.")
-        self.toggle_config_btn.setWhatsThis("Expands or collapses the curator configuration settings. These can remain hidden during routine participant generation and extraction.")
         self.toggle_config_btn.clicked.connect(self.toggleConfigurationContainer)
         main_layout.addWidget(self.toggle_config_btn)
 
@@ -417,7 +395,7 @@ class MainWindow(QMainWindow):
         config_container_layout.setContentsMargins(0, 0, 0, 0)
 
         # Generation Sub-section
-        gen_frame: QFrame = QFrame()
+        gen_frame = QFrame()
         gen_frame.setFrameStyle(QFrame.Shape.Box | QFrame.Shadow.Raised)
         gen_layout = QGridLayout()
         
@@ -426,20 +404,12 @@ class MainWindow(QMainWindow):
         
         target_label = QLabel("Target folder PATH:")
         self.target_pathset = QLabel()
-        self.target_pathset.setToolTip("Directory where new participant folders will be created.")
         target_pathbut = QPushButton("Search")
-        target_pathbut.setToolTip("Choose destination directory for generated folders.")
-        target_pathbut.setWhatsThis("Click Search to select the folder where the software will build each participant's directory and survey copies.")
         target_pathbut.clicked.connect(self.select_target_folder)
         
         quest_count_label = QLabel("Number of questionnaire types:")
         self.quest_count_edit = QLineEdit()
-        self.quest_count_edit.setToolTip("Total distinct survey forms in your study (e.g. 2 for Demographics and NASA-TLX).")
-        self.quest_count_edit.setWhatsThis("Type the number of different PDF forms you want to configure, then click Confirm.")
-        
         quest_count_button = QPushButton("Confirm")
-        quest_count_button.setToolTip("Create template configuration rows.")
-        quest_count_button.setWhatsThis("Generates rows below where you can select each survey's template PDF and set copy counts.")
         quest_count_button.clicked.connect(self.create_questionnaire_rows)
         
         gen_layout.addWidget(gen_title, 0, 0, 1, 3)
@@ -471,18 +441,12 @@ class MainWindow(QMainWindow):
         
         source_label = QLabel("Source folder PATH:")
         self.source_pathset = QLabel()
-        self.source_pathset.setToolTip("Directory where completed participant folders are saved.")
         source_pathbut = QPushButton("Search")
-        source_pathbut.setToolTip("Select the root folder containing completed participant folders.")
-        source_pathbut.setWhatsThis("Choose the folder containing completed participant subfolders. The extractor scans each participant's PDFs inside this directory.")
         source_pathbut.clicked.connect(self.select_source_folder)
         
         excel_label = QLabel("Masterfile PATH:")
         self.excel_pathset = QLabel()
-        self.excel_pathset.setToolTip("Destination masterfile: Parquet (.parquet), Excel (.xlsx/.xls), CSV (.csv), TSV (.tsv), or JSON (.json).")
         excel_pathbut = QPushButton("Search")
-        excel_pathbut.setToolTip("Select or create your masterfile.")
-        excel_pathbut.setWhatsThis("Choose your masterfile. Data from questionnaires will be written into dedicated sheets or partitioned files.")
         excel_pathbut.clicked.connect(self.select_excel_file)
         
         extract_layout.addWidget(extract_title, 0, 0, 1, 3)
@@ -492,7 +456,6 @@ class MainWindow(QMainWindow):
         extract_layout.addWidget(excel_label, 2, 0)
         extract_layout.addWidget(self.excel_pathset, 2, 1)
         extract_layout.addWidget(excel_pathbut, 2, 2)
-        
         extract_frame.setLayout(extract_layout)
         config_container_layout.addWidget(extract_frame)
 
@@ -500,18 +463,14 @@ class MainWindow(QMainWindow):
         self.config_container.setVisible(False)
         main_layout.addWidget(self.config_container)
         
-        # ========== ACTION BUTTONS (ALWAYS VISIBLE) ==========
+        # Action Buttons
         action_layout = QHBoxLayout()
         self.generate_button = QPushButton("Generate Participant Folder(s)")
         self.generate_button.setStyleSheet("font-weight: bold; padding: 10px;")
-        self.generate_button.setToolTip("Create participant folder(s), duplicate templates, and open the prefill dialog.")
-        self.generate_button.setWhatsThis("Click to start generating folders and surveys for all declared participant IDs using the active configuration.")
         self.generate_button.clicked.connect(self.generate_participant_folder)
         
         self.extract_button = QPushButton("Extract Data to Masterfile")
         self.extract_button.setStyleSheet("font-weight: bold; padding: 10px;")
-        self.extract_button.setToolTip("Read PDF answers from completed participant folders into your masterfile.")
-        self.extract_button.setWhatsThis("Reads form field values from completed surveys in the Source folder and appends or updates your masterfile.")
         self.extract_button.clicked.connect(self.extract_data)
 
         action_layout.addWidget(self.generate_button)
@@ -526,7 +485,6 @@ class MainWindow(QMainWindow):
         self.excel_path: str = ""
         self.active_config_name: str = ""
         self.field_mapping: Dict[str, str] = {}
-        
         self.adjustSize()
 
     def toggleConfigurationContainer(self, checked: bool) -> None:
@@ -535,7 +493,6 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(10, self.adjustSize)
 
     def openUserManual(self) -> None:
-        """Opens the in-app markdown manual dialog rendering README.md."""
         dlg = MarkdownManualDialog(self)
         dlg.exec()
 
@@ -569,17 +526,14 @@ class MainWindow(QMainWindow):
             self.questionnaire_rows.clear()
             
             for i in range(count):
-                row: QuestionnaireRow = QuestionnaireRow(i)
+                row = QuestionnaireRow(i)
                 self.questionnaire_rows.append(row)
-                
                 base_row = i * 3
                 self.scroll_layout.addWidget(row.name_label, base_row, 0)
                 self.scroll_layout.addWidget(row.name_edit, base_row, 1, 1, 2)
-                
                 self.scroll_layout.addWidget(row.path_label, base_row + 1, 0)
                 self.scroll_layout.addWidget(row.path_display, base_row + 1, 1)
                 self.scroll_layout.addWidget(row.path_button, base_row + 1, 2)
-                
                 self.scroll_layout.addWidget(row.count_label, base_row + 2, 0)
                 self.scroll_layout.addWidget(row.count_edit, base_row + 2, 1)
                 
@@ -589,9 +543,7 @@ class MainWindow(QMainWindow):
                     line.setFrameShadow(QFrame.Shadow.Sunken)
                     self.scroll_layout.addWidget(line, base_row + 3, 0, 1, 3)
                 
-                row.path_button.clicked.connect(
-                    (lambda r: lambda: self.select_template_file(r))(row)
-                )
+                row.path_button.clicked.connect((lambda r: lambda: self.select_template_file(r))(row))
             
             self.scroll_area.setVisible(True)
             QTimer.singleShot(10, self.adjustSize)
@@ -599,9 +551,7 @@ class MainWindow(QMainWindow):
             self.error_window("Please enter a valid positive number!")
     
     def select_template_file(self, row: QuestionnaireRow) -> None:
-        file_path = QFileDialog.getOpenFileName(
-            self, "Select Template File", "", "PDF Files (*.pdf);;All Files (*.*)"
-        )[0]
+        file_path = QFileDialog.getOpenFileName(self, "Select Template File", "", "PDF Files (*.pdf);;All Files (*.*)")[0]
         if file_path:
             row.template_path = file_path
             row.path_display.setText(file_path)
@@ -638,7 +588,7 @@ class MainWindow(QMainWindow):
             return [pid] if pid else []
 
     def _get_existing_masterfile_pids(self) -> Set[str]:
-        """Detect existing participant IDs already saved in Excel, Parquet, CSV, TSV, or JSON masterfiles."""
+        """Detect existing participant IDs already in masterfile formats."""
         if not self.excel_path or not os.path.exists(self.excel_path):
             return set()
 
@@ -743,7 +693,6 @@ class MainWindow(QMainWindow):
             if not self.questionnaire_rows:
                 return self.error_window("Please configure questionnaires! (Expand 'Configuration Settings' to set templates)")
 
-            # Check which participant folders already exist
             existing_pids = [
                 pid for pid in participant_ids 
                 if os.path.exists(os.path.join(self.target_path, pid))
@@ -759,7 +708,7 @@ class MainWindow(QMainWindow):
                     parent=self
                 )
                 if dlg.exec() != QDialog.DialogCode.Accepted:
-                    return  # User canceled safely
+                    return
                 
                 approved_overwrite = set(dlg.get_selected_pids())
                 pids_to_process = [
@@ -771,7 +720,6 @@ class MainWindow(QMainWindow):
                 QMessageBox.information(self, "No Changes", "No participant folders selected to generate.")
                 return
 
-            # Prepare staging data for the prefill dialog without wiping folders prematurely
             all_generated_pdf_meta: Dict[str, List[Tuple[str, str]]] = {}
             for pid in pids_to_process:
                 surveys_meta: List[Tuple[str, str]] = []
@@ -796,7 +744,6 @@ class MainWindow(QMainWindow):
             if not apply_prefill:
                 return
 
-            # Confirmed: safely create/overwrite folders and write field values
             for pid in pids_to_process:
                 participant_folder = os.path.join(self.target_path, pid)
                 if os.path.exists(participant_folder):
@@ -918,14 +865,11 @@ class MainWindow(QMainWindow):
                         continue
                     local_name = resolve_pdf_object(f.get('/T'))
                     name = str(local_name).strip() if local_name else parent_name
-                    
                     val = resolve_pdf_object(f.get('/V'))
                     if val is None or str(val).strip() in ('', '/Off'):
                         val = resolve_pdf_object(f.get('/AS'))
-                    
                     if name:
                         store_field(name, val)
-                    
                     kids = resolve_pdf_object(f.get('/Kids'))
                     if isinstance(kids, list):
                         walk_acroform_fields(kids, name)
@@ -968,14 +912,12 @@ class MainWindow(QMainWindow):
                         value_raw = resolve_pdf_object(annot.get('/V'))
                         if value_raw is None or str(value_raw).strip() in ('', '/Off'):
                             value_raw = resolve_pdf_object(annot.get('/AS'))
-                        
                         parent = resolve_pdf_object(annot.get('/Parent'))
                         if isinstance(parent, dict):
                             if fname_raw is None:
                                 fname_raw = resolve_pdf_object(parent.get('/T'))
                             if value_raw is None or str(value_raw).strip() in ('', '/Off'):
                                 value_raw = resolve_pdf_object(parent.get('/V')) or resolve_pdf_object(parent.get('/AS'))
-                        
                         store_field(fname_raw, value_raw)
                     except Exception:
                         continue
@@ -986,14 +928,15 @@ class MainWindow(QMainWindow):
 
     def _build_prefill_defaults(self, participant_id: str, fields: Dict[str, Any]) -> Dict[str, Any]:
         defaults: Dict[str, Any] = dict(fields)
-        participant_aliases = {"participant_id", "participant-id", "Text13_n", "Text13"}
+        participant_aliases = {"participant_id", "participant-id", "Text13", "_Text13", "Text1", "_Text1"}
         for field_name in fields.keys():
-            if field_name in participant_aliases and str(fields.get(field_name, "")).strip() == "":
+            clean_name = field_name.strip()
+            if (clean_name in participant_aliases or "participant" in clean_name.lower()) and str(fields.get(field_name, "")).strip() == "":
                 defaults[field_name] = participant_id
         return defaults
 
     def showBatchGenerationPrefillDialogMeta(self, all_generated_pdf_meta: Dict[str, List[Tuple[str, str]]]) -> Tuple[bool, Dict[str, Dict[str, Any]]]:
-        """Presents prefill table reading directly from templates before files are copied to disk."""
+        """Presents consolidated prefill table reading directly from templates."""
         dialog = QDialog(self)
         dialog.setWindowTitle("Consolidated Batch Preview & Generation")
         dialog.setModal(True)
@@ -1011,7 +954,6 @@ class MainWindow(QMainWindow):
         rows: List[Tuple[str, str, str, str, str]] = []
         file_to_extracted_fields: Dict[str, Dict[str, str]] = {}
         template_cache: Dict[str, Dict[str, str]] = {}
-        
         root_order = self.get_configured_root_order()
 
         for participant_id, meta_list in all_generated_pdf_meta.items():
@@ -1038,25 +980,20 @@ class MainWindow(QMainWindow):
                 defaults = self._build_prefill_defaults(participant_id, extracted_fields)
                 file_to_extracted_fields[f"{participant_id}::{file_label}"] = extracted_fields
 
-                preferred_fields: Dict[str, str] = {}
-                for k, v in defaults.items():
-                    if k.endswith('_n'):
-                        base = k[:-2]
-                        if base not in defaults:
-                            preferred_fields[base] = str(v)
-                    else:
-                        preferred_fields[k] = str(v)
-
                 check_matrix_groups: Dict[str, Dict[str, str]] = {}
                 text_fields: Dict[str, str] = {}
                 
-                for field_name in sorted(preferred_fields.keys(), key=natural_sort_key):
-                    val = preferred_fields[field_name]
+                for field_name in sorted(defaults.keys(), key=natural_sort_key):
+                    val = defaults[field_name]
                     m = CANONICAL_PATTERN.match(field_name)
                     if m:
-                        kind, group_x, opt_n = m.group(1).capitalize(), m.group(2), m.group(3)
+                        is_ignored = bool(m.group(1))
+                        kind = m.group(2).capitalize()
+                        group_i = m.group(3)
+                        opt_n = m.group(4)
                         if kind == 'Check' and opt_n is not None:
-                            base_name = f"Check{group_x}"
+                            # Funnel all option buttons into Check<i>
+                            base_name = f"{'_' if is_ignored else ''}Check{group_i}"
                             check_matrix_groups.setdefault(base_name, {})[opt_n] = val
                         else:
                             text_fields[field_name] = val
@@ -1071,7 +1008,10 @@ class MainWindow(QMainWindow):
                 for base_name, options in sorted(check_matrix_groups.items(), key=lambda it: natural_sort_key(it[0])):
                     system_key = f"{survey_type}_{base_name}"
                     display_name = self.field_mapping.get(system_key, self.field_mapping.get(base_name, base_name))
-                    checked_opt = next((opt for opt, cval in sorted(options.items(), key=lambda it: natural_sort_key(it[0])) if cval == '1'), '')
+                    checked_opt = next((
+                        opt for opt, cval in sorted(options.items(), key=lambda it: natural_sort_key(it[0]))
+                        if str(cval).strip() in ('1', 'yes', 'on', 'true') or (str(cval).strip() and str(cval).strip().lower() not in ('0', 'off', 'false'))
+                    ), '')
                     rows.append((participant_id, file_label, base_name, display_name, checked_opt))
 
         table.setRowCount(len(rows))
@@ -1125,17 +1065,21 @@ class MainWindow(QMainWindow):
                 
                 survey_type = os.path.splitext(file_name)[0].replace(f'{pid}_', '', 1)
                 new_name = name_item.text().strip()
-                if new_name:
+                if new_name and not underlying_field_name.startswith('_'):
                     self.field_mapping[f"{survey_type}_{underlying_field_name}"] = new_name
 
-                if underlying_field_name.startswith('Check') and '_' not in underlying_field_name:
+                # Consolidate Check<i> inputs: set target option to 1, all others to 0
+                clean_underlying = underlying_field_name.lstrip('_')
+                if clean_underlying.startswith('Check') and '_' not in clean_underlying:
                     base_name = underlying_field_name
                     raw_fields = file_to_extracted_fields.get(key, {})
                     for raw_f in raw_fields:
                         m = CANONICAL_PATTERN.match(raw_f)
-                        if m and f"Check{m.group(2)}" == base_name and m.group(3) is not None:
-                            col_opt = m.group(3)
-                            prefill_values[key][raw_f] = '1' if col_opt == val else '0'
+                        if m:
+                            f_base = f"{'_' if m.group(1) else ''}Check{m.group(3)}"
+                            if f_base == base_name and m.group(4) is not None:
+                                col_opt = m.group(4)
+                                prefill_values[key][raw_f] = '1' if col_opt == val else '0'
                 else:
                     prefill_values[key][underlying_field_name] = val
 
@@ -1183,42 +1127,50 @@ class MainWindow(QMainWindow):
             ) or clean_type != root_sheet
 
             prefix = f"{clean_type}_" if has_multiple_copies else ""
-
-            preferred_fields: Dict[str, str] = {}
-            for k, v in fields.items():
-                if k.endswith('_n'):
-                    base = k[:-2]
-                    if base not in fields:
-                        preferred_fields[base] = str(v)
-                else:
-                    preferred_fields[k] = str(v)
-
             check_groups: Dict[str, Dict[str, str]] = {}
             
-            for raw_k, v in sorted(preferred_fields.items(), key=lambda it: natural_sort_key(it[0])):
+            for raw_k, v in sorted(fields.items(), key=lambda it: natural_sort_key(it[0])):
+                # '_' prefix is the NOT operator: ignore field from masterfile export
+                if raw_k.startswith('_'):
+                    continue
+
                 val = str(v).strip()
                 m = CANONICAL_PATTERN.match(raw_k)
                 if m:
-                    kind = m.group(1).capitalize()
-                    group_x = m.group(2)
-                    opt_n = m.group(3)
+                    is_ignored = bool(m.group(1))
+                    if is_ignored:
+                        continue
+                    kind = m.group(2).capitalize()
+                    group_i = m.group(3)
+                    opt_n = m.group(4)
 
-                    if kind == 'Check' and opt_n is not None:
-                        base_name = f"Check{group_x}"
-                        check_groups.setdefault(base_name, {})[opt_n] = val
+                    if kind == 'Check':
+                        if opt_n is not None:
+                            base_name = f"Check{group_i}"
+                            check_groups.setdefault(base_name, {})[opt_n] = val
+                        else:
+                            # Standalone checkbox without _n
+                            is_on = val in ('1', 'yes', 'on', 'true') or (val and val.lower() not in ('0', 'off', 'false'))
+                            sheet_data[root_sheet][f"{prefix}Check{group_i}"] = '1' if is_on else '0'
                     else:
-                        sheet_data[root_sheet][f"{prefix}{raw_k}"] = val
+                        sheet_data[root_sheet][f"{prefix}Text{group_i}"] = val
                 else:
-                    sheet_data[root_sheet][f"{prefix}{raw_k}"] = val
+                    if raw_k != 'participant_id':
+                        sheet_data[root_sheet][f"{prefix}{raw_k}"] = val
 
+            # Consolidate grouped checkboxes: column Check<i> gets value 'n' of the selected option
             for base_name, options in sorted(check_groups.items(), key=lambda it: natural_sort_key(it[0])):
-                checked_opt = next((opt for opt, cval in sorted(options.items(), key=lambda it: natural_sort_key(it[0])) if str(cval).strip() == '1'), '')
-                sheet_data[root_sheet][f"{prefix}{base_name}"] = checked_opt
+                checked_opts = [
+                    opt for opt, cval in sorted(options.items(), key=lambda it: natural_sort_key(it[0]))
+                    if str(cval).strip() in ('1', 'yes', 'on', 'true') or (str(cval).strip() and str(cval).strip().lower() not in ('0', 'off', 'false'))
+                ]
+                checked_val = ', '.join(checked_opts) if checked_opts else ''
+                sheet_data[root_sheet][f"{prefix}{base_name}"] = checked_val
 
         return sheet_data
 
     def showBatchExtractionPreviewDialog(self, all_sheet_data: Dict[str, Dict[str, Dict[str, Any]]]) -> Tuple[bool, Dict[str, Dict[str, Dict[str, Any]]]]:
-        """Displays all extracted participants in one unified editable preview dialog before writing."""
+        """Displays extracted participants in one unified editable preview dialog before writing."""
         dialog = QDialog(self)
         dialog.setWindowTitle("Preview Masterfile Extraction")
         dialog.setModal(True)
@@ -1230,8 +1182,8 @@ class MainWindow(QMainWindow):
         layout.addWidget(label)
         
         root_order = self.get_configured_root_order()
-
         flat_rows: List[Tuple[str, str, str, str, str]] = []
+        
         for pid in sorted(all_sheet_data.keys(), key=natural_sort_key):
             sheets_map = all_sheet_data[pid]
             sorted_sheet_names = sorted(
@@ -1313,7 +1265,7 @@ class MainWindow(QMainWindow):
         return result[0], edited_output if result[0] else all_sheet_data
 
     def _readout_batch(self, participant_ids: List[str], all_participants_sheet_data: Dict[str, Dict[str, Dict[str, Any]]]) -> None:
-        """Writes all processed participants in a single session across Excel, Parquet, CSV, TSV, or JSON formats."""
+        """Writes all processed participants in a single session across supported formats."""
         if not self.excel_path:
             raise ValueError("Please select a masterfile! (Expand 'Configuration Settings' to select masterfile)")
 
@@ -1356,7 +1308,6 @@ class MainWindow(QMainWindow):
                         
                         if sheet_name in sheet_names:
                             sheet: xlw.Sheet = cast(xlw.Sheet, wb.sheets[sheet_name])
-                            
                             first_row = sheet.range('1:1').value
                             header_map: Dict[str, int] = {}
                             if first_row:
@@ -1371,7 +1322,7 @@ class MainWindow(QMainWindow):
                             if existing_cols != incoming_cols:
                                 missing = existing_cols - incoming_cols
                                 extra = incoming_cols - existing_cols
-                                msg = (f"Schema Mismatch Detected in Sheet '{sheet_name}' for participant '{pid}'!\n")
+                                msg = f"Schema Mismatch Detected in Sheet '{sheet_name}' for participant '{pid}'!\n"
                                 if missing:
                                     msg += f"\nMissing: {list(missing)}"
                                 if extra:
@@ -1435,12 +1386,11 @@ class MainWindow(QMainWindow):
         # ==================== PARQUET EXPORT (.parquet) ====================
         elif file_ext == 'parquet':
             if not HAS_PYARROW and not HAS_PANDAS:
-                raise ValueError("Exporting to Parquet format requires 'pyarrow' (or 'pandas'). Please install it using: pip install pyarrow")
+                raise ValueError("Exporting to Parquet format requires 'pyarrow' (or 'pandas').")
 
             base_dir = os.path.dirname(self.excel_path)
             base_name = os.path.splitext(os.path.basename(self.excel_path))[0]
 
-            # Collect unique sheet names
             all_sheet_names: Set[str] = set()
             for pid in participant_ids:
                 all_sheet_names.update(all_participants_sheet_data.get(pid, {}).keys())
@@ -1463,24 +1413,20 @@ class MainWindow(QMainWindow):
                     except Exception:
                         existing_rows = []
 
-                # Merge/Overwrite rows for incoming participants
                 for pid in participant_ids:
                     raw_data = all_participants_sheet_data.get(pid, {}).get(sheet_name)
                     if not raw_data:
                         continue
 
                     export_data: Dict[str, Any] = {'participant_id': pid}
-                    sorted_field_keys = sorted(
-                        [k for k in raw_data.keys() if k != 'participant_id'],
-                        key=natural_sort_key
-                    )
+                    sorted_field_keys = sorted([k for k in raw_data.keys() if k != 'participant_id'], key=natural_sort_key)
                     for k in sorted_field_keys:
                         mapped_k = self.field_mapping.get(k)
                         if not mapped_k:
                             mapped_k = self.field_mapping.get(f"{sheet_name}_{k}")
                         if not mapped_k:
                             for map_k, map_v in self.field_mapping.items():
-                                if k.endswith(f"_{map_k}") or map_k.endswith(f"_{k}"):
+                                if k.endswith(f"_{map_k}") or map_k.endswith(f"_{key}"):
                                     mapped_k = map_v
                                     break
                         export_data[mapped_k or k] = raw_data[k]
@@ -1534,10 +1480,7 @@ class MainWindow(QMainWindow):
                     file_exists = os.path.exists(target_file) and os.path.getsize(target_file) > 0
 
                     export_data = {'participant_id': pid}
-                    sorted_field_keys = sorted(
-                        [k for k in raw_data.keys() if k != 'participant_id'],
-                        key=natural_sort_key
-                    )
+                    sorted_field_keys = sorted([k for k in raw_data.keys() if k != 'participant_id'], key=natural_sort_key)
                     for k in sorted_field_keys:
                         mapped_k = self.field_mapping.get(k)
                         if not mapped_k:
@@ -1603,10 +1546,7 @@ class MainWindow(QMainWindow):
                             existing_rows = []
 
                     export_data = {'participant_id': pid}
-                    sorted_field_keys = sorted(
-                        [k for k in raw_data.keys() if k != 'participant_id'],
-                        key=natural_sort_key
-                    )
+                    sorted_field_keys = sorted([k for k in raw_data.keys() if k != 'participant_id'], key=natural_sort_key)
                     for k in sorted_field_keys:
                         mapped_k = self.field_mapping.get(k)
                         if not mapped_k:
@@ -1647,7 +1587,6 @@ class MainWindow(QMainWindow):
             return self.error_window("Please enter at least one participant ID!")
 
         try:
-            # 1. Detect existing participants in the masterfile
             existing_masterfile_pids = self._get_existing_masterfile_pids()
             conflicting_pids = [pid for pid in participant_ids if pid in existing_masterfile_pids]
 
@@ -1661,7 +1600,7 @@ class MainWindow(QMainWindow):
                     parent=self
                 )
                 if dlg.exec() != QDialog.DialogCode.Accepted:
-                    return  # User canceled safely
+                    return
                 
                 approved_overwrite = set(dlg.get_selected_pids())
                 pids_to_extract = [
@@ -1673,17 +1612,14 @@ class MainWindow(QMainWindow):
                 QMessageBox.information(self, "No Changes", "No participants selected to extract.")
                 return
 
-            # 2. Extract questionnaire data into memory
             all_sheet_data: Dict[str, Dict[str, Dict[str, Any]]] = {}
             for pid in pids_to_extract:
                 all_sheet_data[pid] = self._prepare_data_for_extraction(pid)
 
-            # 3. Present unified batch extraction preview dialog
             confirmed, edited_data = self.showBatchExtractionPreviewDialog(all_sheet_data)
             if not confirmed:
                 return
 
-            # 4. Commit all extracted data to masterfile in one single pass
             self._readout_batch(pids_to_extract, edited_data)
             QMessageBox.information(
                 self, "Extraction Complete", 
@@ -1716,12 +1652,27 @@ class MainWindow(QMainWindow):
 
                 check_matrix_bases: set[str] = set()
                 for field_name in template_fields.keys():
+                    # '_' prefix is the NOT operator: ignore from masterfile mapping
+                    if field_name.startswith('_'):
+                        continue
+
                     m = CANONICAL_PATTERN.match(field_name)
-                    if m and m.group(1).capitalize() == 'Check' and m.group(3) is not None:
-                        check_matrix_bases.add(f"Check{m.group(2)}")
+                    if m:
+                        is_ignored = bool(m.group(1))
+                        if is_ignored:
+                            continue
+                        kind = m.group(2).capitalize()
+                        group_i = m.group(3)
+                        opt_n = m.group(4)
+
+                        if kind == 'Check':
+                            # Consolidate Check<i>_n into single field Check<i>
+                            check_matrix_bases.add(f"Check{group_i}")
+                        else:
+                            expected.add(f"{prefix}Text{group_i}")
                     else:
-                        clean_f = field_name[:-2] if field_name.endswith('_n') else field_name
-                        expected.add(f"{prefix}{clean_f}")
+                        if field_name != 'participant_id':
+                            expected.add(f"{prefix}{field_name}")
 
                 for base_name in check_matrix_bases:
                     expected.add(f"{prefix}{base_name}")
@@ -1734,7 +1685,6 @@ class MainWindow(QMainWindow):
             return self.field_mapping
 
         stored = self._load_mapping_from_config(self.active_config_name) if self.active_config_name else {}
-        
         mapping = {}
         for f in sorted(expected, key=natural_sort_key):
             mapping[f] = stored.get(f, self.field_mapping.get(f, f))
@@ -1777,7 +1727,6 @@ class MainWindow(QMainWindow):
             cfg.write(f)
 
     def importFieldMapping(self, source_config_name: str) -> None:
-        """Import field mapping definitions from another configuration profile into the active workspace."""
         source_mapping = self._load_mapping_from_config(source_config_name)
         if not source_mapping:
             return self.error_window(f"Configuration '{source_config_name}' does not contain any saved field mappings!")
@@ -1794,7 +1743,7 @@ class MainWindow(QMainWindow):
         QMessageBox.information(
             self, "Field Mapping Imported",
             f"Successfully imported {matched_count} field mapping(s) from '{source_config_name}'."
-            + (f"\nSaved into active configuration '{self.active_config_name}'." if self.active_config_name else "\nRetained in memory for immediate generation and extraction.")
+            + (f"\nSaved into active configuration '{self.active_config_name}'." if self.active_config_name else "\nRetained in memory.")
         )
 
     def editFieldMappingFromExtraction(self) -> None:
@@ -1944,7 +1893,6 @@ class MainWindow(QMainWindow):
         
         self.active_config_name = name
         self.field_mapping = self._load_mapping_from_config(name)
-        
         QMessageBox.information(self, "Success", f"Configuration snapshot '{name}' loaded successfully!")
 
     def enterWhatsThisMode(self) -> None:
