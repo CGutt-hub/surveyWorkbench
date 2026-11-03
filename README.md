@@ -30,7 +30,7 @@ A desktop workbench for study coordinators and researchers. Prepare standardized
 
 PDF form fields must adhere to the following mathematical specification:
 
-$$\mathbf{(\_)\{Check, Text\}i(\_n)}$$
+$$\mathbf{(\_)\{Check, Text\}<i>(\_n)}$$
 
 ### Breakdown of Grammar Elements:
 
@@ -38,7 +38,7 @@ $$\mathbf{(\_)\{Check, Text\}i(\_n)}$$
 | :--- | :--- | :--- |
 | **`_`** | **NOT Operator** (optional leading underscore) | If present, the content of this field **does NOT get exported into the masterfile**. It simply gets ignored during extraction. Ideal for administrative cover-page notes, visual participant ID labels, or print-only metadata. |
 | **`{Check, Text}`** | **Entry Type** | Declares the input type. `Text` fields capture verbatim strings. `Check` fields represent boolean, binary, or nominal selection controls. |
-| **`i`** | **Field / Question Index** | Index number of the form question or condition. If option buttons belong to the same question, $i$ stays constant while $n$ changes. |
+| **`<i>`** | **Field / Question Index** | Index number of the form question or condition. If option buttons belong to the same question, $i$ stays constant while $n$ changes. |
 | **`_n`** | **Option Identifier** (optional) | Specifies the choice identifier. In the masterfile, the cell shows **`n`** for column `Check<i>` if this option is chosen to be true. |
 
 ### Concrete Examples:

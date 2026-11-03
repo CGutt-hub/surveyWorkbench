@@ -1285,77 +1285,71 @@ class MainWindow(QMainWindow):
 
                     for sheet_name in ordered_sheet_names:
                         raw_data = sheet_data[sheet_name]
-                        export_data: Dict[str, Any] = {'participant_id': pid}
                         
+                        export_data: Dict[str, Any] = {'participant_id': pid}
+                        system_to_target_header: Dict[str, str] = {'participant_id': 'participant_id'}
+
                         sorted_field_keys = sorted(
                             [k for k in raw_data.keys() if k != 'participant_id'],
                             key=natural_sort_key
                         )
 
-                        for key in sorted_field_keys:
-                            value = raw_data[key]
-                            col_name = self.field_mapping.get(key)
+                        for sys_key in sorted_field_keys:
+                            value = raw_data[sys_key]
+                            col_name = self.field_mapping.get(sys_key)
                             if not col_name:
-                                col_name = self.field_mapping.get(f"{sheet_name}_{key}")
+                                col_name = self.field_mapping.get(f"{sheet_name}_{sys_key}")
                             if not col_name:
                                 for map_k, map_v in self.field_mapping.items():
-                                    if key.endswith(f"_{map_k}") or map_k.endswith(f"_{key}"):
+                                    if sys_key.endswith(f"_{map_k}") or map_k.endswith(f"_{sys_key}"):
                                         col_name = map_v
                                         break
-                            export_data[col_name or key] = value
+                            final_col = col_name or sys_key
+                            export_data[final_col] = value
+                            system_to_target_header[sys_key] = final_col
 
                         sheet_names = [cast(str, s.name) for s in wb.sheets]
                         
                         if sheet_name in sheet_names:
                             sheet: xlw.Sheet = cast(xlw.Sheet, wb.sheets[sheet_name])
-                            first_row = sheet.range('1:1').value
-                            header_map: Dict[str, int] = {}
-                            if first_row:
-                                row_vals = first_row if isinstance(first_row, list) else [first_row]
-                                for c_idx, val in enumerate(row_vals, start=1):
-                                    if val is not None and str(val).strip():
-                                        header_map[str(val).strip()] = c_idx
-
-                            existing_cols = set(header_map.keys())
-                            incoming_cols = set(export_data.keys())
                             
-                            if existing_cols != incoming_cols:
-                                missing = existing_cols - incoming_cols
-                                extra = incoming_cols - existing_cols
-                                msg = f"Schema Mismatch Detected in Sheet '{sheet_name}' for participant '{pid}'!\n"
-                                if missing:
-                                    msg += f"\nMissing: {list(missing)}"
-                                if extra:
-                                    msg += f"\nExtra: {list(extra)}"
-                                msg += "\n\nProceed anyway?"
-                                
-                                if QMessageBox.question(self, "Schema Mismatch Warning", msg,
-                                                        cast(QMessageBox.StandardButton, QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No),
-                                                        QMessageBox.StandardButton.No) == QMessageBox.StandardButton.No:
-                                    raise ValueError(f"Extraction aborted for '{pid}' due to schema mismatch in '{sheet_name}'.")
+                            # Read current Row 1 headers from Excel
+                            first_row = sheet.range('1:1').value
+                            existing_headers: List[str] = []
+                            if first_row:
+                                existing_headers = [
+                                    str(v).strip() for v in (first_row if isinstance(first_row, list) else [first_row])
+                                    if v is not None and str(v).strip()
+                                ]
 
-                            next_col = max(header_map.values(), default=0) + 1
-                            for key in export_data.keys():
-                                if key not in header_map:
-                                    sheet.range(1, next_col).value = key
-                                    header_map[key] = next_col
-                                    next_col += 1
+                            header_to_col: Dict[str, int] = {h: idx for idx, h in enumerate(existing_headers, start=1)}
+                            
+                            # Update Row 1 headers in-place if mappings changed, or append new columns to the end
+                            for sys_k, target_h in system_to_target_header.items():
+                                if target_h not in header_to_col:
+                                    if sys_k in header_to_col:
+                                        col_idx = header_to_col[sys_k]
+                                        sheet.range(1, col_idx).value = target_h
+                                        del header_to_col[sys_k]
+                                        header_to_col[target_h] = col_idx
+                                    else:
+                                        next_col = max(header_to_col.values(), default=0) + 1
+                                        sheet.range(1, next_col).value = target_h
+                                        header_to_col[target_h] = next_col
 
+                            # Locate participant row in Column A (r_idx = 2 onwards)
                             target_row = None
                             r_idx = 2
                             while True:
-                                val = sheet.range(f'A{r_idx}').value
-                                if val is None:
+                                cell_val = sheet.range(f'A{r_idx}').value
+                                if cell_val is None:
                                     break
-                                if str(val).strip() == str(pid):
+                                if str(cell_val).strip() == str(pid):
                                     target_row = r_idx
                                     break
                                 r_idx += 1
 
-                            next_row = target_row if target_row is not None else 2
-                            if target_row is None:
-                                while sheet.range(f'A{next_row}').value is not None:
-                                    next_row += 1
+                            write_row = target_row if target_row is not None else r_idx
 
                         else:
                             if len(wb.sheets) == 1 and wb.sheets[0].range('A1').value is None:
@@ -1365,17 +1359,18 @@ class MainWindow(QMainWindow):
                                 sheet = cast(xlw.Sheet, wb.sheets.add(name=sheet_name, after=wb.sheets[-1]))
 
                             headers = list(export_data.keys())
-                            header_map = {}
+                            header_to_col = {}
                             for idx, header in enumerate(headers, start=1):
                                 sheet.range(1, idx).value = header
-                                header_map[header] = idx
+                                header_to_col[header] = idx
 
-                            next_row = 2
+                            write_row = 2
 
-                        for key, val in export_data.items():
-                            col_idx = header_map.get(key)
-                            if col_idx:
-                                sheet.range(next_row, col_idx).value = val
+                        # Write all values for this participant in their designated row
+                        for col_header, val in export_data.items():
+                            c_idx = header_to_col.get(col_header)
+                            if c_idx:
+                                sheet.range(write_row, c_idx).value = val
 
                 cast(xlw.Book, wb).save()
             except Exception:
@@ -1426,7 +1421,7 @@ class MainWindow(QMainWindow):
                             mapped_k = self.field_mapping.get(f"{sheet_name}_{k}")
                         if not mapped_k:
                             for map_k, map_v in self.field_mapping.items():
-                                if k.endswith(f"_{map_k}") or map_k.endswith(f"_{key}"):
+                                if k.endswith(f"_{map_k}") or map_k.endswith(f"_{k}"):
                                     mapped_k = map_v
                                     break
                         export_data[mapped_k or k] = raw_data[k]
