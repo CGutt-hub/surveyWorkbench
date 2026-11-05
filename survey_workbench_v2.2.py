@@ -45,7 +45,7 @@ except ImportError:
 #                   - Nominal/Likert: Check1_1 to Check1_5 -> selected Check1_3 yields '3'
 #                   - Binary: Check2_0 (False/No) and Check2_1 (True/Yes) yield '0' or '1'
 # ==============================================================================
-CANONICAL_PATTERN = re.compile(r'^(_)?(Text|Check)(\d+)(?:_([a-zA-Z0-9]+))?$', re.IGNORECASE)
+CANONICAL_PATTERN = re.compile(r'^(_)?(Text|Check)(\d+)(?:[._]([a-zA-Z0-9]+))?$', re.IGNORECASE)
 CONFIG_FILENAME = "survey_workbench.config"
 
 
@@ -767,36 +767,44 @@ class MainWindow(QMainWindow):
             self.error_window(f"Error generating folder(s): {str(e)}")
 
     def _write_pdf_form_fields(self, pdf_path: str, field_values: Dict[str, Any]) -> None:
+        """Write values into PDF form fields and widget appearances reliably."""
         reader = PdfReader(pdf_path)
         writer = PdfWriter()
         writer.append(reader)
 
-        def _update_field_tree(fields_array: Any) -> None:
-            for ref in fields_array:
-                try:
-                    obj = resolve_pdf_object(ref)
-                    name_raw = resolve_pdf_object(obj.get('/T'))
-                    if name_raw is not None:
-                        name_str = str(name_raw)
-                        if name_str in field_values:
-                            new_val = str(field_values[name_str])
-                            ft = str(resolve_pdf_object(obj.get('/FT', '')))
-                            if ft == '/Btn':
-                                if new_val == '1':
-                                    v = NameObject('/Yes')
-                                elif new_val == '0':
-                                    v = NameObject('/Off')
-                                else:
-                                    v = NameObject(f'/{new_val}' if not new_val.startswith('/') else new_val)
-                                obj[NameObject('/V')] = v
-                                obj[NameObject('/AS')] = v
-                            else:
-                                obj[NameObject('/V')] = create_string_object(new_val)
-                    kids = resolve_pdf_object(obj.get('/Kids'))
-                    if isinstance(kids, list):
-                        _update_field_tree(kids)
-                except Exception:
-                    continue
+        def _update_tree(obj_ref: Any, inherited_name: str = "") -> None:
+            obj = resolve_pdf_object(obj_ref)
+            if not isinstance(obj, dict):
+                return
+            local_t = resolve_pdf_object(obj.get('/T'))
+            field_name = str(local_t).strip() if local_t else inherited_name
+
+            if field_name in field_values:
+                val_to_set = str(field_values[field_name]).strip()
+                ft = str(resolve_pdf_object(obj.get('/FT', '')))
+                
+                # Checkbox or Radio Button
+                if ft == '/Btn' or '/AS' in obj or '/AP' in obj:
+                    ap_n = resolve_pdf_object(obj.get('/AP', {}).get('/N', {})) if isinstance(obj.get('/AP'), dict) else {}
+                    valid_states = [str(k) for k in ap_n.keys()] if isinstance(ap_n, dict) else []
+                    
+                    if val_to_set == '1':
+                        on_state = next((k for k in valid_states if k != '/Off'), '/Yes')
+                        v = NameObject(on_state if on_state.startswith('/') else f'/{on_state}')
+                    elif val_to_set == '0':
+                        v = NameObject('/Off')
+                    else:
+                        v = NameObject(f'/{val_to_set}' if not val_to_set.startswith('/') else val_to_set)
+                        
+                    obj[NameObject('/V')] = v
+                    obj[NameObject('/AS')] = v
+                else:
+                    obj[NameObject('/V')] = create_string_object(val_to_set)
+
+            kids = resolve_pdf_object(obj.get('/Kids'))
+            if isinstance(kids, list):
+                for k_ref in kids:
+                    _update_tree(k_ref, field_name)
 
         try:
             root_obj = resolve_pdf_object(cast(Any, writer).trailer['/Root'])
@@ -805,13 +813,17 @@ class MainWindow(QMainWindow):
                 acroform = resolve_pdf_object(acroform_ref)
                 fields_raw = resolve_pdf_object(acroform.get('/Fields'))
                 if isinstance(fields_raw, list):
-                    _update_field_tree(fields_raw)
+                    for f in fields_raw:
+                        _update_tree(f)
         except Exception:
             pass
 
         for page in writer.pages:
             try:
-                writer.update_page_form_field_values(page, field_values)
+                annots = resolve_pdf_object(page.get('/Annots'))
+                if isinstance(annots, list):
+                    for a_ref in annots:
+                        _update_tree(a_ref)
             except Exception:
                 pass
 
@@ -820,6 +832,7 @@ class MainWindow(QMainWindow):
             writer.write(output_file)
 
     def _extract_pdf_form_fields(self, pdf_path: str) -> Dict[str, str]:
+        """Deep extract form fields, radio groups, and appearance states without bleed."""
         try:
             reader = PdfReader(pdf_path)
         except Exception:
@@ -836,9 +849,9 @@ class MainWindow(QMainWindow):
             text = str(resolved).strip()
             if text.startswith('/'):
                 unslashed = text[1:].strip()
-                if unslashed.lower() in ('yes', 'on', 'true', '1'):
+                if unslashed.lower() in ('yes', 'on', 'true'):
                     return '1'
-                elif unslashed.lower() in ('off', 'false', '0'):
+                elif unslashed.lower() in ('off', 'false'):
                     return '0'
                 return unslashed
             return text
@@ -855,26 +868,33 @@ class MainWindow(QMainWindow):
             elif extracted[key] in ('', '0') and val_str not in ('', '0'):
                 extracted[key] = val_str
 
-        def walk_acroform_fields(fields_list: Any, parent_name: str = "") -> None:
-            if not isinstance(fields_list, list):
+        def walk_field_hierarchy(obj_ref: Any, inherited_name: str = "") -> None:
+            obj = resolve_pdf_object(obj_ref)
+            if not isinstance(obj, dict):
                 return
-            for field_ref in fields_list:
-                try:
-                    f = resolve_pdf_object(field_ref)
-                    if not isinstance(f, dict):
-                        continue
-                    local_name = resolve_pdf_object(f.get('/T'))
-                    name = str(local_name).strip() if local_name else parent_name
-                    val = resolve_pdf_object(f.get('/V'))
-                    if val is None or str(val).strip() in ('', '/Off'):
-                        val = resolve_pdf_object(f.get('/AS'))
-                    if name:
-                        store_field(name, val)
-                    kids = resolve_pdf_object(f.get('/Kids'))
-                    if isinstance(kids, list):
-                        walk_acroform_fields(kids, name)
-                except Exception:
-                    continue
+            local_t = resolve_pdf_object(obj.get('/T'))
+            local_name = str(local_t).strip() if local_t else ""
+
+            if inherited_name and local_name:
+                field_name = f"{inherited_name}.{local_name}"
+            else:
+                field_name = local_name or inherited_name
+
+            raw_v = resolve_pdf_object(obj.get('/V'))
+            raw_as = resolve_pdf_object(obj.get('/AS'))
+
+            # For widgets/buttons: read their own active /AS state
+            if raw_as is not None and str(raw_as).strip() not in ('', '/Off'):
+                store_field(field_name, raw_as)
+            elif raw_v is not None and str(raw_v).strip() not in ('', '/Off'):
+                store_field(field_name, raw_v)
+            else:
+                store_field(field_name, '0')
+
+            kids = resolve_pdf_object(obj.get('/Kids'))
+            if isinstance(kids, list):
+                for k_ref in kids:
+                    walk_field_hierarchy(k_ref, field_name)
 
         try:
             root = resolve_pdf_object(reader.trailer.get('/Root', {}))
@@ -883,7 +903,8 @@ class MainWindow(QMainWindow):
                 acro = resolve_pdf_object(acro_ref)
                 fields_raw = resolve_pdf_object(acro.get('/Fields'))
                 if isinstance(fields_raw, list):
-                    walk_acroform_fields(fields_raw)
+                    for f in fields_raw:
+                        walk_field_hierarchy(f)
         except Exception:
             pass
 
@@ -891,10 +912,9 @@ class MainWindow(QMainWindow):
             acro_fields = reader.get_fields() or {}
             for fname, fmeta in acro_fields.items():
                 if isinstance(fmeta, dict):
-                    val = resolve_pdf_object(fmeta.get('/V'))
-                    if val is None or str(val).strip() in ('', '/Off'):
-                        val = resolve_pdf_object(fmeta.get('/AS'))
-                    store_field(fname, val)
+                    v = resolve_pdf_object(fmeta.get('/V'))
+                    if v is not None and str(v).strip() not in ('', '/Off'):
+                        store_field(fname, v)
         except Exception:
             pass
 
@@ -909,16 +929,13 @@ class MainWindow(QMainWindow):
                         if not isinstance(annot, dict) or str(annot.get('/Subtype', '')) != '/Widget':
                             continue
                         fname_raw = resolve_pdf_object(annot.get('/T'))
-                        value_raw = resolve_pdf_object(annot.get('/V'))
-                        if value_raw is None or str(value_raw).strip() in ('', '/Off'):
-                            value_raw = resolve_pdf_object(annot.get('/AS'))
                         parent = resolve_pdf_object(annot.get('/Parent'))
-                        if isinstance(parent, dict):
-                            if fname_raw is None:
-                                fname_raw = resolve_pdf_object(parent.get('/T'))
-                            if value_raw is None or str(value_raw).strip() in ('', '/Off'):
-                                value_raw = resolve_pdf_object(parent.get('/V')) or resolve_pdf_object(parent.get('/AS'))
-                        store_field(fname_raw, value_raw)
+                        if fname_raw is None and isinstance(parent, dict):
+                            fname_raw = resolve_pdf_object(parent.get('/T'))
+                        if fname_raw is not None:
+                            val_as = resolve_pdf_object(annot.get('/AS'))
+                            if val_as is not None and str(val_as).strip() not in ('', '/Off'):
+                                store_field(fname_raw, val_as)
                     except Exception:
                         continue
         except Exception:
@@ -985,14 +1002,13 @@ class MainWindow(QMainWindow):
                 
                 for field_name in sorted(defaults.keys(), key=natural_sort_key):
                     val = defaults[field_name]
-                    m = CANONICAL_PATTERN.match(field_name)
+                    m = CANONICAL_PATTERN.match(field_name.split('.')[-1])
                     if m:
                         is_ignored = bool(m.group(1))
                         kind = m.group(2).capitalize()
                         group_i = m.group(3)
                         opt_n = m.group(4)
                         if kind == 'Check' and opt_n is not None:
-                            # Funnel all option buttons into Check<i>
                             base_name = f"{'_' if is_ignored else ''}Check{group_i}"
                             check_matrix_groups.setdefault(base_name, {})[opt_n] = val
                         else:
@@ -1068,13 +1084,14 @@ class MainWindow(QMainWindow):
                 if new_name and not underlying_field_name.startswith('_'):
                     self.field_mapping[f"{survey_type}_{underlying_field_name}"] = new_name
 
-                # Consolidate Check<i> inputs: set target option to 1, all others to 0
+                # Consolidate Check<i> inputs: set selected option to 1, all others to 0
                 clean_underlying = underlying_field_name.lstrip('_')
-                if clean_underlying.startswith('Check') and '_' not in clean_underlying:
+                if clean_underlying.startswith('Check') and ('_' not in clean_underlying and '.' not in clean_underlying):
                     base_name = underlying_field_name
                     raw_fields = file_to_extracted_fields.get(key, {})
                     for raw_f in raw_fields:
-                        m = CANONICAL_PATTERN.match(raw_f)
+                        short_f = raw_f.split('.')[-1]
+                        m = CANONICAL_PATTERN.match(short_f)
                         if m:
                             f_base = f"{'_' if m.group(1) else ''}Check{m.group(3)}"
                             if f_base == base_name and m.group(4) is not None:
@@ -1130,12 +1147,12 @@ class MainWindow(QMainWindow):
             check_groups: Dict[str, Dict[str, str]] = {}
             
             for raw_k, v in sorted(fields.items(), key=lambda it: natural_sort_key(it[0])):
-                # '_' prefix is the NOT operator: ignore field from masterfile export
                 if raw_k.startswith('_'):
                     continue
 
+                short_k = raw_k.split('.')[-1]
                 val = str(v).strip()
-                m = CANONICAL_PATTERN.match(raw_k)
+                m = CANONICAL_PATTERN.match(short_k)
                 if m:
                     is_ignored = bool(m.group(1))
                     if is_ignored:
@@ -1146,12 +1163,18 @@ class MainWindow(QMainWindow):
 
                     if kind == 'Check':
                         if opt_n is not None:
+                            # Group option under base condition Check<i>
                             base_name = f"Check{group_i}"
                             check_groups.setdefault(base_name, {})[opt_n] = val
                         else:
-                            # Standalone checkbox without _n
+                            # Radio button group or standalone Check<i>
+                            # If value carries the selected choice (e.g. Check1_1, _1, or 1)
+                            choice_m = re.search(r'(?:Check\d+_|_)?([a-zA-Z0-9]+)$', val, re.IGNORECASE)
+                            extracted_n = choice_m.group(1) if choice_m and val.lower() not in ('1', 'yes', 'on', 'true') else val
+                            
                             is_on = val in ('1', 'yes', 'on', 'true') or (val and val.lower() not in ('0', 'off', 'false'))
-                            sheet_data[root_sheet][f"{prefix}Check{group_i}"] = '1' if is_on else '0'
+                            final_val = extracted_n if (extracted_n and val.lower() not in ('1', 'yes', 'on', 'true')) else ('1' if is_on else '0')
+                            sheet_data[root_sheet][f"{prefix}Check{group_i}"] = final_val
                     else:
                         sheet_data[root_sheet][f"{prefix}Text{group_i}"] = val
                 else:
@@ -1312,8 +1335,6 @@ class MainWindow(QMainWindow):
                         
                         if sheet_name in sheet_names:
                             sheet: xlw.Sheet = cast(xlw.Sheet, wb.sheets[sheet_name])
-                            
-                            # Read current Row 1 headers from Excel
                             first_row = sheet.range('1:1').value
                             existing_headers: List[str] = []
                             if first_row:
@@ -1324,7 +1345,6 @@ class MainWindow(QMainWindow):
 
                             header_to_col: Dict[str, int] = {h: idx for idx, h in enumerate(existing_headers, start=1)}
                             
-                            # Update Row 1 headers in-place if mappings changed, or append new columns to the end
                             for sys_k, target_h in system_to_target_header.items():
                                 if target_h not in header_to_col:
                                     if sys_k in header_to_col:
@@ -1337,7 +1357,6 @@ class MainWindow(QMainWindow):
                                         sheet.range(1, next_col).value = target_h
                                         header_to_col[target_h] = next_col
 
-                            # Locate participant row in Column A (r_idx = 2 onwards)
                             target_row = None
                             r_idx = 2
                             while True:
@@ -1366,7 +1385,6 @@ class MainWindow(QMainWindow):
 
                             write_row = 2
 
-                        # Write all values for this participant in their designated row
                         for col_header, val in export_data.items():
                             c_idx = header_to_col.get(col_header)
                             if c_idx:
@@ -1647,11 +1665,11 @@ class MainWindow(QMainWindow):
 
                 check_matrix_bases: set[str] = set()
                 for field_name in template_fields.keys():
-                    # '_' prefix is the NOT operator: ignore from masterfile mapping
                     if field_name.startswith('_'):
                         continue
 
-                    m = CANONICAL_PATTERN.match(field_name)
+                    short_name = field_name.split('.')[-1]
+                    m = CANONICAL_PATTERN.match(short_name)
                     if m:
                         is_ignored = bool(m.group(1))
                         if is_ignored:
@@ -1661,7 +1679,6 @@ class MainWindow(QMainWindow):
                         opt_n = m.group(4)
 
                         if kind == 'Check':
-                            # Consolidate Check<i>_n into single field Check<i>
                             check_matrix_bases.add(f"Check{group_i}")
                         else:
                             expected.add(f"{prefix}Text{group_i}")
