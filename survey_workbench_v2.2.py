@@ -676,6 +676,13 @@ class MainWindow(QMainWindow):
             return str(int(cell_val))
         return str(cell_val).strip()
 
+    def _sanitize_excel_sheet_name(self, name: str) -> str:
+        """Sanitize and truncate sheet names to obey Excel's 31-char and character rules."""
+        cleaned = re.sub(r'[\\/?*\[\]:]', '_', name).strip()
+        if not cleaned:
+            cleaned = "Sheet"
+        return cleaned[:31]
+
     def _get_masterfile_siblings(self, base_dir: str, base_name: str, valid_exts: Tuple[str, ...]) -> List[str]:
         if not os.path.isdir(base_dir):
             return []
@@ -1618,11 +1625,16 @@ class MainWindow(QMainWindow):
                     raw_data = sheet_data[sheet_name]
                     export_data, system_to_target_header = self._build_export_row(pid, sheet_name, raw_data)
 
-                    sheet_names = [str(s.name) for s in wb.sheets]
+                    excel_sheet_name = self._sanitize_excel_sheet_name(sheet_name)
+                    existing_sheet_map: Dict[str, xlw.Sheet] = {
+                        str(s.name).strip().lower(): s for s in wb.sheets
+                    }
+                    matched_sheet = existing_sheet_map.get(excel_sheet_name.lower())
                     header_to_col: Dict[str, int] = {}
+                    sheet: xlw.Sheet
 
-                    if sheet_name in sheet_names:
-                        sheet: xlw.Sheet = wb.sheets[sheet_name]
+                    if matched_sheet is not None:
+                        sheet = matched_sheet
                         first_row = sheet.range('1:1').value
                         if first_row:
                             row_vals = first_row if isinstance(first_row, list) else [first_row]
@@ -1661,11 +1673,15 @@ class MainWindow(QMainWindow):
 
                         write_row = target_row if target_row is not None else r_idx
                     else:
-                        if len(wb.sheets) == 1 and wb.sheets[0].range('A1').value is None:
+                        if (
+                            len(wb.sheets) == 1
+                            and wb.sheets[0].range('A1').value is None
+                            and wb.sheets[0].used_range.value is None
+                        ):
                             sheet = wb.sheets[0]
-                            sheet.name = sheet_name
+                            sheet.name = excel_sheet_name
                         else:
-                            sheet = wb.sheets.add(name=sheet_name, after=wb.sheets[-1])
+                            sheet = wb.sheets.add(name=excel_sheet_name, after=wb.sheets[-1])
 
                         headers = list(export_data.keys())
                         for idx, header_name in enumerate(headers, start=1):
