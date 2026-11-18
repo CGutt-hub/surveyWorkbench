@@ -17,7 +17,7 @@ from PyQt5.QtWidgets import (
     QScrollArea, QVBoxLayout, QFrame, QLayout,
     QMenu, QDialog, QWhatsThis, QTextEdit, QTableWidget,
     QTableWidgetItem, QHeaderView, QCheckBox, QHBoxLayout,
-    QToolButton, QTextBrowser
+    QToolButton, QTextBrowser, QRadioButton, QButtonGroup
 )
 from PyQt5.QtCore import pyqtSignal, Qt, QTimer
 import xlwings as xlw
@@ -57,8 +57,12 @@ except ImportError:
 #                   'Check<i>' displays 'n' instead of the internal PDF value.
 #                   - Nominal/Likert: Check1_1 to Check1_5 -> selected Check1_3 yields '3'
 #                   - Binary: Check2_0 (False/No) and Check2_1 (True/Yes) yield '0' or '1'
+#
+#   (_)con(_n)    : Optional condition declaration field used to order mixed-condition
+#                   surveys (e.g., nasa_1, nasa_2, nasa_3) consistently in the row.
 # ==============================================================================
 CANONICAL_PATTERN = re.compile(r'^(_)?(Text|Check)(\d+)(?:[._]([a-zA-Z0-9]+))?$', re.IGNORECASE)
+CON_FIELD_PATTERN = re.compile(r'^(_)?con(?:[._]([a-zA-Z0-9-]+))?$', re.IGNORECASE)
 INVALID_ID_CHARS_PATTERN = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 CONFIG_FILENAME = "survey_workbench.config"
 
@@ -135,6 +139,20 @@ def match_canonical_field(field_name: str) -> Optional[re.Match[str]]:
     for idx in range(1, len(parts)):
         candidate = '.'.join(parts[idx:])
         m = CANONICAL_PATTERN.match(candidate)
+        if m:
+            return m
+    return None
+
+
+def match_con_field(field_name: str) -> Optional[re.Match[str]]:
+    """Match CON_FIELD_PATTERN against full name first, then dot-separated suffixes."""
+    m = CON_FIELD_PATTERN.match(field_name)
+    if m:
+        return m
+    parts = field_name.split('.')
+    for idx in range(1, len(parts)):
+        candidate = '.'.join(parts[idx:])
+        m = CON_FIELD_PATTERN.match(candidate)
         if m:
             return m
     return None
@@ -282,6 +300,106 @@ class OverwriteResolutionDialog(QDialog):
         return [pid for pid, cb in self.checkboxes.items() if cb.isChecked()]
 
 
+class BatchParticipantSelectionDialog(QDialog):
+    """Presents all batch participants with checkboxes so users can untick any they do not want to export."""
+    def __init__(
+        self,
+        all_pids: List[str],
+        conflicting_pids: Set[str],
+        parent: Optional[QWidget] = None
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Select Participants to Export")
+        self.setModal(True)
+        self.resize(580, 460)
+
+        self.checkboxes: Dict[str, QCheckBox] = {}
+        self.conflicting_pids: Set[str] = conflicting_pids
+        layout = QVBoxLayout()
+
+        prompt_label = QLabel(
+            "Select which participant(s) to export to the masterfile.\n"
+            "Untick any participant you do not want to export from this batch:"
+        )
+        prompt_label.setWordWrap(True)
+        prompt_label.setStyleSheet("font-weight: bold; font-size: 13px; margin-bottom: 5px;")
+        layout.addWidget(prompt_label)
+
+        btn_bar = QHBoxLayout()
+        select_all_btn = QPushButton("Select All")
+        deselect_all_btn = QPushButton("Deselect All")
+        select_all_btn.clicked.connect(self.select_all)
+        deselect_all_btn.clicked.connect(self.deselect_all)
+        btn_bar.addWidget(select_all_btn)
+        btn_bar.addWidget(deselect_all_btn)
+        if conflicting_pids:
+            select_new_btn = QPushButton("Select New Only")
+            select_new_btn.clicked.connect(self.select_new_only)
+            btn_bar.addWidget(select_new_btn)
+        btn_bar.addStretch()
+        layout.addLayout(btn_bar)
+
+        unique_pids = sorted(dict.fromkeys(all_pids), key=natural_sort_key)
+        table = QTableWidget(len(unique_pids), 3)
+        table.setHorizontalHeaderLabels(["Export?", "Participant ID", "Masterfile Status"])
+        header = table.horizontalHeader()
+        if header is not None:
+            header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+            header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+            header.setStretchLastSection(True)
+
+        for idx, pid in enumerate(unique_pids):
+            cb = QCheckBox()
+            cb.setChecked(True)
+            self.checkboxes[pid] = cb
+
+            cb_container = QWidget()
+            cb_layout = QHBoxLayout(cb_container)
+            cb_layout.addWidget(cb)
+            cb_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            cb_layout.setContentsMargins(0, 0, 0, 0)
+
+            table.setCellWidget(idx, 0, cb_container)
+
+            pid_item = QTableWidgetItem(pid)
+            set_item_read_only(pid_item)
+            table.setItem(idx, 1, pid_item)
+
+            status_text = "Already in Masterfile (will overwrite)" if pid in conflicting_pids else "New"
+            status_item = QTableWidgetItem(status_text)
+            set_item_read_only(status_item)
+            table.setItem(idx, 2, status_item)
+
+        layout.addWidget(table)
+
+        action_layout = QHBoxLayout()
+        confirm_btn = QPushButton("Confirm Selection")
+        confirm_btn.setStyleSheet("font-weight: bold;")
+        cancel_btn = QPushButton("Cancel")
+        confirm_btn.clicked.connect(self.accept)
+        cancel_btn.clicked.connect(self.reject)
+
+        action_layout.addWidget(confirm_btn)
+        action_layout.addWidget(cancel_btn)
+        layout.addLayout(action_layout)
+        self.setLayout(layout)
+
+    def select_all(self) -> None:
+        for cb in self.checkboxes.values():
+            cb.setChecked(True)
+
+    def deselect_all(self) -> None:
+        for cb in self.checkboxes.values():
+            cb.setChecked(False)
+
+    def select_new_only(self) -> None:
+        for pid, cb in self.checkboxes.items():
+            cb.setChecked(pid not in self.conflicting_pids)
+
+    def get_selected_pids(self) -> List[str]:
+        return [pid for pid, cb in self.checkboxes.items() if cb.isChecked()]
+
+
 class SaveConfigWindow(QDialog):
     signal = pyqtSignal(str)
 
@@ -377,6 +495,7 @@ class MainWindow(QMainWindow):
         self.excel_path: str = ""
         self.active_config_name: str = ""
         self.field_mapping: Dict[str, str] = {}
+        self.condition_ordering: Dict[str, Any] = self._default_condition_ordering()
 
         main_widget = QWidget()
         main_layout = QVBoxLayout()
@@ -407,6 +526,10 @@ class MainWindow(QMainWindow):
                 edit_mapping_action = QAction("&Save/Edit Field Mapping", self)
                 edit_mapping_action.triggered.connect(self.editFieldMappingFromExtraction)
                 file_menu.addAction(edit_mapping_action)
+
+                edit_condition_order_action = QAction("&Save/Edit Condition Ordering", self)
+                edit_condition_order_action.triggered.connect(self.openConditionOrderingDialog)
+                file_menu.addAction(edit_condition_order_action)
 
             help_menu = menubar.addMenu("&HELP")
             if help_menu is not None:
@@ -569,15 +692,434 @@ class MainWindow(QMainWindow):
                 order.append(name)
         return order
 
+    def _strip_pid_from_stem(self, stem: str, participant_id: str) -> str:
+        pid_esc = re.escape(participant_id)
+        cleaned = re.sub(rf'^{pid_esc}_', '', stem, count=1, flags=re.IGNORECASE)
+        if cleaned == stem:
+            cleaned = re.sub(rf'_{pid_esc}$', '', stem, count=1, flags=re.IGNORECASE)
+        return cleaned
+
     def _get_root_survey_name(self, clean_filename: str) -> str:
+        """Derive the root sheet name directly from the given filename, stripping copy indices."""
         clean = clean_filename.strip()
-        for s_name in sorted(self.get_configured_root_order(), key=len, reverse=True):
-            if clean == s_name or clean.startswith(s_name):
-                return s_name
-        m = re.match(r'^(.*?)\d+$', clean)
-        if m and m.group(1):
-            return m.group(1).rstrip('_')
-        return clean
+        if not clean:
+            return clean
+        clean_lower = clean.lower()
+
+        configured_names = sorted(self.get_configured_root_order(), key=len, reverse=True)
+
+        # Preserve configured survey names that legitimately end in digits (e.g. 'Big5' or 'Big5_1' -> 'Big5')
+        for s_name in configured_names:
+            s_lower = s_name.lower()
+            if clean_lower == s_lower:
+                return clean
+            if re.match(rf'^{re.escape(s_lower)}(?:[\s_-]*\d+|[\s_-]*copy(?:\s*\(?\d+\)?)?)$', clean_lower):
+                return clean[:len(s_name)]
+
+        # Strip optional trailing copy suffix and trailing numerical copy index (e.g., nasa_1 -> nasa, you_are_an_idiot_34 -> you_are_an_idiot)
+        stripped = re.sub(r'[\s_-]*copy(?:\s*\(?\d+\)?)?$', '', clean, flags=re.IGNORECASE).strip('_- ')
+        stripped = re.sub(r'[\s_-]*\d+$', '', stripped).strip('_- ')
+        return stripped if stripped else clean
+
+    def _default_condition_ordering(self) -> Dict[str, Any]:
+        return {"mode": "numerical", "mappings": []}
+
+    def _load_condition_ordering_from_config(self, config_name: str) -> Dict[str, Any]:
+        if not config_name:
+            return self._default_condition_ordering()
+        cfg = new_config_parser()
+        cfg.read(get_config_path(), encoding='utf-8')
+        if not cfg.has_section(config_name):
+            return self._default_condition_ordering()
+        raw = cfg.get(config_name, 'condition_ordering_json', fallback='')
+        if raw.strip():
+            try:
+                loaded = json.loads(raw)
+                if isinstance(loaded, dict):
+                    mode = str(loaded.get("mode", "numerical")).lower()
+                    if mode not in ("numerical", "custom"):
+                        mode = "numerical"
+                    raw_mappings = loaded.get("mappings", [])
+                    cleaned_mappings: List[Dict[str, Any]] = []
+                    if isinstance(raw_mappings, list):
+                        for item in raw_mappings:
+                            if not isinstance(item, dict):
+                                continue
+                            code = str(item.get("code", "")).strip()
+                            survey = str(item.get("survey", "*")).strip() or "*"
+                            meaning = str(item.get("meaning", "")).strip()
+                            try:
+                                order_val = int(item.get("order", 0))
+                            except (ValueError, TypeError):
+                                order_val = 0
+                            if code and order_val >= 1:
+                                cleaned_mappings.append({
+                                    "survey": survey,
+                                    "code": code,
+                                    "order": order_val,
+                                    "meaning": meaning
+                                })
+                    return {"mode": mode, "mappings": cleaned_mappings}
+            except Exception:
+                return self._default_condition_ordering()
+        return self._default_condition_ordering()
+
+    def _save_condition_ordering_to_config(self, config_name: str, ordering: Dict[str, Any]) -> None:
+        if not config_name:
+            return
+        cfg = new_config_parser()
+        cfg.read(get_config_path(), encoding='utf-8')
+        if not cfg.has_section(config_name):
+            cfg.add_section(config_name)
+        cfg.set(config_name, 'condition_ordering_json', json.dumps(ordering, ensure_ascii=False))
+        write_config_atomically(cfg, get_config_path())
+
+    def _extract_condition_from_fields(self, fields: Dict[str, str]) -> str:
+        """Extract the condition declaration ('con' / '_con' / 'con_<opt>') from a PDF's fields."""
+        for raw_k, raw_v in sorted(fields.items(), key=lambda it: natural_sort_key(it[0])):
+            m = match_con_field(raw_k)
+            if m and m.group(2) is None:
+                val = str(raw_v).strip()
+                if val:
+                    return val
+
+        for raw_k, raw_v in sorted(fields.items(), key=lambda it: natural_sort_key(it[0])):
+            m = match_con_field(raw_k)
+            if m and m.group(2) is not None:
+                val = str(raw_v).strip()
+                if val != '' and val.lower() not in ('off', 'false', '0'):
+                    return m.group(2).strip()
+        return ""
+
+    def _resolve_condition_slot(self, root_sheet: str, raw_con: str) -> Optional[int]:
+        """Resolve raw 'con' value to a 1-based condition slot order, or None if unmapped."""
+        con_clean = str(raw_con).strip()
+        if not con_clean:
+            return None
+
+        con_lower = con_clean.lower()
+        sheet_lower = root_sheet.strip().lower()
+        mode = str(self.condition_ordering.get("mode", "numerical")).lower()
+        mappings = self.condition_ordering.get("mappings", [])
+
+        # Search survey-specific mappings first, then wildcard '*' mappings
+        for target_scope in (sheet_lower, "*"):
+            for item in mappings:
+                if not isinstance(item, dict):
+                    continue
+                item_survey = str(item.get("survey", "*")).strip().lower() or "*"
+                if item_survey != target_scope:
+                    continue
+                codes = [c.strip().lower() for c in str(item.get("code", "")).split(",") if c.strip()]
+                if con_lower in codes:
+                    try:
+                        order_val = int(item.get("order", 0))
+                        if order_val >= 1:
+                            return order_val
+                    except (ValueError, TypeError):
+                        pass
+
+        # In numerical (standard) mode, integer 'con' values map directly to that slot number
+        if mode == "numerical" and con_clean.isdigit():
+            order_val = int(con_clean)
+            if order_val >= 1:
+                return order_val
+
+        return None
+
+    def _scan_source_for_conditions(self) -> List[Tuple[str, str]]:
+        """Scan PDFs in source_path for unique (root_sheet, raw_con) pairs."""
+        if not self.source_path or not os.path.isdir(self.source_path):
+            return []
+        found: List[Tuple[str, str]] = []
+        seen: Set[Tuple[str, str]] = set()
+
+        for root_dir, _dirs, files in os.walk(self.source_path):
+            folder_name = os.path.basename(root_dir)
+            for pdf_file in sorted(files, key=natural_sort_key):
+                if not pdf_file.lower().endswith('.pdf'):
+                    continue
+                stem = os.path.splitext(pdf_file)[0]
+                clean_type = self._strip_pid_from_stem(stem, folder_name)
+                root_sheet = self._get_root_survey_name(clean_type)
+                fields = self._extract_pdf_form_fields(os.path.join(root_dir, pdf_file))
+                raw_con = self._extract_condition_from_fields(fields)
+                if raw_con:
+                    pair = (root_sheet, raw_con)
+                    key = (root_sheet.lower(), raw_con.lower())
+                    if key not in seen:
+                        seen.add(key)
+                        found.append(pair)
+        return found
+
+    def openConditionOrderingDialog(self) -> None:
+        self.editConditionOrdering()
+
+    def editConditionOrdering(
+        self,
+        prepopulate_items: Optional[List[Tuple[str, str]]] = None,
+        prompt_reason: Optional[str] = None
+    ) -> bool:
+        """Open popup dialog to configure numerical vs custom condition ordering and meanings."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Save/Edit Condition Ordering")
+        dialog.setModal(True)
+        dialog.resize(780, 520)
+
+        layout = QVBoxLayout()
+
+        if prompt_reason:
+            warn_lbl = QLabel(prompt_reason)
+            warn_lbl.setWordWrap(True)
+            warn_lbl.setStyleSheet("font-weight: bold; color: #b35900; margin-bottom: 4px;")
+            layout.addWidget(warn_lbl)
+
+        mode_frame = QFrame()
+        mode_frame.setFrameShape(QFrame.Shape.Box)
+        mode_layout = QVBoxLayout()
+        mode_title = QLabel("Condition Ordering Mode (from PDF field 'con'):")
+        mode_title.setStyleSheet("font-weight: bold;")
+        mode_layout.addWidget(mode_title)
+
+        rb_numerical = QRadioButton("Numerical (Standard — numeric 'con' values 1, 2, 3... directly set column order)")
+        rb_custom = QRadioButton("Custom Condition Ordering (use defined table order & meanings for codes)")
+        mode_group = QButtonGroup(dialog)
+        mode_group.addButton(rb_numerical)
+        mode_group.addButton(rb_custom)
+
+        current_mode = str(self.condition_ordering.get("mode", "numerical")).lower()
+        if prepopulate_items and current_mode == "numerical":
+            rb_numerical.setChecked(True)
+        elif current_mode == "custom":
+            rb_custom.setChecked(True)
+        else:
+            rb_numerical.setChecked(True)
+
+        mode_layout.addWidget(rb_numerical)
+        mode_layout.addWidget(rb_custom)
+        mode_frame.setLayout(mode_layout)
+        layout.addWidget(mode_frame)
+
+        info_lbl = QLabel(
+            "Define non-numeric condition codes (e.g., 'sf', 'bl', 'hf') or custom overrides below.\n"
+            "Codes listed here are remembered in the project config and work in both modes:"
+        )
+        info_lbl.setWordWrap(True)
+        layout.addWidget(info_lbl)
+
+        btn_bar = QHBoxLayout()
+        add_btn = QPushButton("Add Row")
+        remove_btn = QPushButton("Remove Selected")
+        scan_btn = QPushButton("Scan Source PDFs for 'con'")
+        btn_bar.addWidget(add_btn)
+        btn_bar.addWidget(remove_btn)
+        btn_bar.addWidget(scan_btn)
+        btn_bar.addStretch()
+        layout.addLayout(btn_bar)
+
+        existing_mappings: List[Dict[str, Any]] = [
+            dict(m) for m in self.condition_ordering.get("mappings", []) if isinstance(m, dict)
+        ]
+
+        # Merge any newly discovered unmapped items
+        if prepopulate_items:
+            used_orders_by_survey: Dict[str, Set[int]] = {}
+            existing_codes_by_survey: Dict[str, Set[str]] = {}
+            for m in existing_mappings:
+                sv = str(m.get("survey", "*")).strip().lower() or "*"
+                try:
+                    used_orders_by_survey.setdefault(sv, set()).add(int(m.get("order", 0)))
+                except (ValueError, TypeError):
+                    pass
+                for c in str(m.get("code", "")).split(","):
+                    if c.strip():
+                        existing_codes_by_survey.setdefault(sv, set()).add(c.strip().lower())
+
+            for sv_raw, code_raw in prepopulate_items:
+                sv_key = sv_raw.strip().lower() or "*"
+                code_l = code_raw.strip().lower()
+                if code_l in existing_codes_by_survey.get(sv_key, set()) or code_l in existing_codes_by_survey.get("*", set()):
+                    continue
+                used = used_orders_by_survey.setdefault(sv_key, set())
+                next_order = int(code_raw) if code_raw.strip().isdigit() and int(code_raw) >= 1 else 1
+                while next_order in used:
+                    next_order += 1
+                used.add(next_order)
+                existing_codes_by_survey.setdefault(sv_key, set()).add(code_l)
+                existing_mappings.append({
+                    "survey": sv_raw.strip() or "*",
+                    "code": code_raw.strip(),
+                    "order": next_order,
+                    "meaning": ""
+                })
+
+        table = QTableWidget(len(existing_mappings), 4)
+        table.setHorizontalHeaderLabels([
+            "Survey (* = All)", "Condition Code ('con')", "Order (1, 2, 3...)", "Meaning / Description"
+        ])
+        header = table.horizontalHeader()
+        if header is not None:
+            header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+            header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+            header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+            header.setStretchLastSection(True)
+
+        def populate_row(r_idx: int, survey: str, code: str, order: str, meaning: str) -> None:
+            table.setItem(r_idx, 0, QTableWidgetItem(survey))
+            table.setItem(r_idx, 1, QTableWidgetItem(code))
+            table.setItem(r_idx, 2, QTableWidgetItem(order))
+            table.setItem(r_idx, 3, QTableWidgetItem(meaning))
+
+        for idx, item in enumerate(existing_mappings):
+            populate_row(
+                idx,
+                str(item.get("survey", "*")),
+                str(item.get("code", "")),
+                str(item.get("order", "")),
+                str(item.get("meaning", ""))
+            )
+
+        layout.addWidget(table)
+
+        def add_row() -> None:
+            r_idx = table.rowCount()
+            table.insertRow(r_idx)
+            populate_row(r_idx, "*", "", str(r_idx + 1), "")
+
+        def remove_selected() -> None:
+            selected_rows = sorted({idx.row() for idx in table.selectedIndexes()}, reverse=True)
+            for r_idx in selected_rows:
+                table.removeRow(r_idx)
+
+        def scan_source_pdfs() -> None:
+            if not self.source_path or not os.path.isdir(self.source_path):
+                return self.error_window("Please select a valid Source folder first! (Expand 'Configuration Settings')")
+            discovered = self._scan_source_for_conditions()
+            if not discovered:
+                QMessageBox.information(dialog, "Scan Complete", "No 'con' fields with values were found in the source folder.")
+                return
+
+            existing_pairs: Set[Tuple[str, str]] = set()
+            used_orders: Dict[str, Set[int]] = {}
+            for r_idx in range(table.rowCount()):
+                sv_item = table.item(r_idx, 0)
+                cd_item = table.item(r_idx, 1)
+                or_item = table.item(r_idx, 2)
+                sv_val = sv_item.text().strip().lower() if sv_item else "*"
+                cd_val = cd_item.text().strip().lower() if cd_item else ""
+                for c in cd_val.split(","):
+                    if c.strip():
+                        existing_pairs.add((sv_val, c.strip()))
+                if or_item and or_item.text().strip().isdigit():
+                    used_orders.setdefault(sv_val, set()).add(int(or_item.text().strip()))
+
+            added_count = 0
+            for sv_raw, cd_raw in discovered:
+                sv_l = sv_raw.lower()
+                cd_l = cd_raw.lower()
+                if (sv_l, cd_l) in existing_pairs or ("*", cd_l) in existing_pairs:
+                    continue
+                used = used_orders.setdefault(sv_l, set())
+                ord_num = int(cd_raw) if cd_raw.isdigit() and int(cd_raw) >= 1 else 1
+                while ord_num in used:
+                    ord_num += 1
+                used.add(ord_num)
+                existing_pairs.add((sv_l, cd_l))
+
+                r_idx = table.rowCount()
+                table.insertRow(r_idx)
+                populate_row(r_idx, sv_raw, cd_raw, str(ord_num), "")
+                added_count += 1
+
+            QMessageBox.information(
+                dialog, "Scan Complete",
+                f"Found {len(discovered)} unique condition value(s); added {added_count} new row(s)."
+            )
+
+        add_btn.clicked.connect(add_row)
+        remove_btn.clicked.connect(remove_selected)
+        scan_btn.clicked.connect(scan_source_pdfs)
+
+        action_layout = QHBoxLayout()
+        save_btn = QPushButton("Save Condition Ordering")
+        save_btn.setStyleSheet("font-weight: bold;")
+        cancel_btn = QPushButton("Cancel")
+        action_layout.addWidget(save_btn)
+        action_layout.addWidget(cancel_btn)
+        layout.addLayout(action_layout)
+        dialog.setLayout(layout)
+
+        saved_flag = [False]
+
+        def save_and_close() -> None:
+            new_mode = "custom" if rb_custom.isChecked() else "numerical"
+            new_mappings: List[Dict[str, Any]] = []
+            seen_codes: Set[Tuple[str, str]] = set()
+            seen_orders: Set[Tuple[str, int]] = set()
+
+            for r_idx in range(table.rowCount()):
+                sv_item = table.item(r_idx, 0)
+                cd_item = table.item(r_idx, 1)
+                or_item = table.item(r_idx, 2)
+                mn_item = table.item(r_idx, 3)
+
+                survey = (sv_item.text().strip() if sv_item else "") or "*"
+                code = cd_item.text().strip() if cd_item else ""
+                order_txt = or_item.text().strip() if or_item else ""
+                meaning = mn_item.text().strip() if mn_item else ""
+
+                if not code and not order_txt and not meaning:
+                    continue
+                if not code:
+                    return self.error_window(f"Row {r_idx + 1}: Condition Code ('con') cannot be empty.")
+                if not order_txt.isdigit() or int(order_txt) < 1:
+                    return self.error_window(f"Row {r_idx + 1}: Order must be a positive integer (1, 2, 3...).")
+
+                order_val = int(order_txt)
+                sv_l = survey.lower()
+                if (sv_l, order_val) in seen_orders:
+                    return self.error_window(
+                        f"Duplicate order '{order_val}' for survey '{survey}'.\n"
+                        "Use comma-separated codes in one row if you want aliases for the same slot."
+                    )
+                seen_orders.add((sv_l, order_val))
+
+                for single_c in [c.strip().lower() for c in code.split(",") if c.strip()]:
+                    if (sv_l, single_c) in seen_codes:
+                        return self.error_window(f"Duplicate condition code '{single_c}' for survey '{survey}'.")
+                    seen_codes.add((sv_l, single_c))
+
+                new_mappings.append({
+                    "survey": survey,
+                    "code": code,
+                    "order": order_val,
+                    "meaning": meaning
+                })
+
+            new_mappings.sort(key=lambda it: (str(it["survey"]).lower(), int(it["order"])))
+            self.condition_ordering = {"mode": new_mode, "mappings": new_mappings}
+
+            if self.active_config_name:
+                self._save_condition_ordering_to_config(self.active_config_name, self.condition_ordering)
+                if not prompt_reason:
+                    QMessageBox.information(
+                        self, "Success",
+                        f"Condition ordering saved to active configuration '{self.active_config_name}'."
+                    )
+            else:
+                if not prompt_reason:
+                    QMessageBox.information(
+                        self, "Success",
+                        "Condition ordering saved in memory. Click 'Save Configuration' to create a permanent snapshot."
+                    )
+
+            saved_flag[0] = True
+            dialog.accept()
+
+        save_btn.clicked.connect(save_and_close)
+        cancel_btn.clicked.connect(dialog.reject)
+        dialog.exec()
+        return saved_flag[0]
 
     def _clear_questionnaire_rows(self) -> None:
         while self.scroll_layout.count():
@@ -708,15 +1250,15 @@ class MainWindow(QMainWindow):
             try:
                 wb = xlw.Book(self.excel_path)
                 for sheet in wb.sheets:
-                    r = 2
-                    while True:
-                        cell_val = sheet.range(f'A{r}').value
-                        if cell_val is None:
-                            break
-                        cell_str = self._normalize_excel_pid(cell_val)
-                        if cell_str:
-                            existing_pids.add(cell_str)
-                        r += 1
+                    last_used_row = sheet.used_range.last_cell.row
+                    if last_used_row >= 2:
+                        col_a_vals = sheet.range((2, 1), (last_used_row, 1)).value
+                        if not isinstance(col_a_vals, list):
+                            col_a_vals = [col_a_vals]
+                        for cell_val in col_a_vals:
+                            cell_str = self._normalize_excel_pid(cell_val)
+                            if cell_str:
+                                existing_pids.add(cell_str)
             except Exception:
                 pass
             finally:
@@ -1207,15 +1749,15 @@ class MainWindow(QMainWindow):
             sorted_meta = sorted(
                 meta_list,
                 key=lambda m: (
-                    root_order.index(self._get_root_survey_name(os.path.splitext(m[0])[0].replace(f'{participant_id}_', '', 1)))
-                    if self._get_root_survey_name(os.path.splitext(m[0])[0].replace(f'{participant_id}_', '', 1)) in root_order
+                    root_order.index(self._get_root_survey_name(self._strip_pid_from_stem(os.path.splitext(m[0])[0], participant_id)))
+                    if self._get_root_survey_name(self._strip_pid_from_stem(os.path.splitext(m[0])[0], participant_id)) in root_order
                     else 9999,
                     natural_sort_key(m[0])
                 )
             )
 
             for file_label, template_path in sorted_meta:
-                survey_type = os.path.splitext(file_label)[0].replace(f'{participant_id}_', '', 1)
+                survey_type = self._strip_pid_from_stem(os.path.splitext(file_label)[0], participant_id)
 
                 if template_path not in template_cache:
                     template_cache[template_path] = self._extract_pdf_form_fields(template_path)
@@ -1265,7 +1807,7 @@ class MainWindow(QMainWindow):
         table.setRowCount(len(rows))
         original_displayed: Dict[Tuple[str, str], str] = {}
         for idx, (pid, file_label, f_name, display_name, value) in enumerate(rows):
-            survey_type = os.path.splitext(file_label)[0].replace(f'{pid}_', '', 1)
+            survey_type = self._strip_pid_from_stem(os.path.splitext(file_label)[0], pid)
             original_displayed[(survey_type, f_name)] = display_name
 
             pid_item = QTableWidgetItem(pid)
@@ -1318,7 +1860,7 @@ class MainWindow(QMainWindow):
                 underlying_field_name = rows[row_index][2]
                 val = value_item.text().strip() if value_item is not None else ""
 
-                survey_type = os.path.splitext(file_name)[0].replace(f'{pid}_', '', 1)
+                survey_type = self._strip_pid_from_stem(os.path.splitext(file_name)[0], pid)
                 new_name = name_item.text().strip()
                 if new_name and not underlying_field_name.startswith('_') and not underlying_field_name.split('.')[-1].startswith('_'):
                     sys_map_key = f"{survey_type}_{underlying_field_name}"
@@ -1358,15 +1900,61 @@ class MainWindow(QMainWindow):
             return True, prefill_values_result
         return False, {}
 
-    def _prepare_data_for_extraction(self, participant_id: str) -> Dict[str, Dict[str, Any]]:
+    def _get_participant_folder(self, participant_id: str) -> str:
         normalized_source = os.path.normpath(self.source_path)
         candidate_sub = os.path.join(self.source_path, participant_id)
         if os.path.isdir(candidate_sub):
-            participant_folder = candidate_sub
-        elif os.path.basename(normalized_source) == participant_id:
-            participant_folder = self.source_path
-        else:
-            participant_folder = candidate_sub
+            return candidate_sub
+        if os.path.basename(normalized_source) == participant_id:
+            return self.source_path
+        return candidate_sub
+
+    def _find_unmapped_conditions(
+        self,
+        participant_ids: List[str],
+        fields_cache: Dict[str, Dict[str, str]]
+    ) -> List[Tuple[str, str]]:
+        """Scan selected participants' PDFs and return any (root_sheet, raw_con) lacking a slot order."""
+        unmapped: List[Tuple[str, str]] = []
+        seen: Set[Tuple[str, str]] = set()
+
+        for pid in participant_ids:
+            participant_folder = self._get_participant_folder(pid)
+            if not os.path.isdir(participant_folder):
+                continue
+            survey_files = sorted(
+                [f for f in os.listdir(participant_folder) if f.lower().endswith('.pdf')],
+                key=natural_sort_key
+            )
+            for pdf_file in survey_files:
+                pdf_path = os.path.join(participant_folder, pdf_file)
+                if pdf_path not in fields_cache:
+                    fields_cache[pdf_path] = self._extract_pdf_form_fields(pdf_path)
+                fields = fields_cache[pdf_path]
+                if not fields:
+                    continue
+
+                stem = os.path.splitext(pdf_file)[0]
+                clean_type = self._strip_pid_from_stem(stem, pid)
+                root_sheet = self._get_root_survey_name(clean_type)
+
+                raw_con = self._extract_condition_from_fields(fields)
+                if not raw_con:
+                    continue
+                if self._resolve_condition_slot(root_sheet, raw_con) is None:
+                    key = (root_sheet.lower(), raw_con.lower())
+                    if key not in seen:
+                        seen.add(key)
+                        unmapped.append((root_sheet, raw_con))
+
+        return unmapped
+
+    def _prepare_data_for_extraction(
+        self,
+        participant_id: str,
+        fields_cache: Optional[Dict[str, Dict[str, str]]] = None
+    ) -> Dict[str, Dict[str, Any]]:
+        participant_folder = self._get_participant_folder(participant_id)
 
         if not os.path.exists(participant_folder):
             raise ValueError(f"Participant folder not found: {participant_folder}")
@@ -1378,29 +1966,81 @@ class MainWindow(QMainWindow):
         if not survey_files:
             raise ValueError(f"No readable questionnaire data found for participant '{participant_id}'.")
 
-        sheet_data: Dict[str, Dict[str, Any]] = {}
+        parsed_files: List[Tuple[str, str, str, Dict[str, str], str, Optional[int]]] = []
+        root_counts: Dict[str, int] = {}
+        seen_slots: Dict[Tuple[str, int], str] = {}
 
         for pdf_file in survey_files:
-            clean_type = os.path.splitext(pdf_file)[0].replace(f"{participant_id}_", "", 1)
-            fields = self._extract_pdf_form_fields(os.path.join(participant_folder, pdf_file))
+            pdf_path = os.path.join(participant_folder, pdf_file)
+            if fields_cache is not None and pdf_path in fields_cache:
+                fields = fields_cache[pdf_path]
+            else:
+                fields = self._extract_pdf_form_fields(pdf_path)
+                if fields_cache is not None:
+                    fields_cache[pdf_path] = fields
+
             if not fields:
                 continue
 
+            stem = os.path.splitext(pdf_file)[0]
+            clean_type = self._strip_pid_from_stem(stem, participant_id)
             root_sheet = self._get_root_survey_name(clean_type)
+
+            raw_con = self._extract_condition_from_fields(fields)
+            slot = self._resolve_condition_slot(root_sheet, raw_con) if raw_con else None
+
+            if slot is not None:
+                slot_key = (root_sheet.lower(), slot)
+                if slot_key in seen_slots:
+                    raise ValueError(
+                        f"Duplicate condition slot {slot} (con='{raw_con}') for participant '{participant_id}' "
+                        f"in survey '{root_sheet}':\n'{seen_slots[slot_key]}' and '{pdf_file}'."
+                    )
+                seen_slots[slot_key] = pdf_file
+
+            parsed_files.append((pdf_file, clean_type, root_sheet, fields, raw_con, slot))
+            root_counts[root_sheet] = root_counts.get(root_sheet, 0) + 1
+
+        configured_copy_counts: Dict[str, int] = {}
+        for r in self.questionnaire_rows:
+            s_name = r.name_edit.text().strip()
+            if s_name:
+                try:
+                    c = max(1, int(r.count_edit.text()))
+                except ValueError:
+                    c = 1
+                configured_copy_counts[s_name.lower()] = max(configured_copy_counts.get(s_name.lower(), 1), c)
+
+        # Process files ordered by resolved condition slot first (when present), then naturally by filename
+        parsed_files.sort(key=lambda item: (item[5] if item[5] is not None else 999999, natural_sort_key(item[0])))
+
+        sheet_data: Dict[str, Dict[str, Any]] = {}
+
+        for _pdf_file, clean_type, root_sheet, fields, raw_con, slot in parsed_files:
             if root_sheet not in sheet_data:
                 sheet_data[root_sheet] = {'participant_id': participant_id}
 
-            has_multiple_copies = any(
-                clean_type != self._get_root_survey_name(os.path.splitext(f)[0].replace(f"{participant_id}_", "", 1))
-                for f in survey_files
-                if self._get_root_survey_name(os.path.splitext(f)[0].replace(f"{participant_id}_", "", 1)) == root_sheet
-            ) or clean_type != root_sheet
+            if slot is not None:
+                prefix = f"{root_sheet}_{slot}_"
+            else:
+                has_multiple_copies = (
+                    root_counts.get(root_sheet, 1) > 1
+                    or configured_copy_counts.get(root_sheet.lower(), 1) > 1
+                    or clean_type.lower() != root_sheet.lower()
+                )
+                prefix = f"{clean_type}_" if has_multiple_copies else ""
 
-            prefix = f"{clean_type}_" if has_multiple_copies else ""
             check_groups: Dict[str, Dict[str, str]] = {}
+            has_unignored_con = False
 
             for raw_k, v in sorted(fields.items(), key=lambda it: natural_sort_key(it[0])):
                 if raw_k.startswith('_') or raw_k.split('.')[-1].startswith('_'):
+                    continue
+
+                cm = match_con_field(raw_k)
+                if cm:
+                    if not cm.group(1):
+                        has_unignored_con = True
                     continue
 
                 val = str(v).strip()
@@ -1448,6 +2088,9 @@ class MainWindow(QMainWindow):
                         if val != '' or target_key not in sheet_data[root_sheet]:
                             sheet_data[root_sheet][target_key] = val
 
+            if has_unignored_con and raw_con:
+                sheet_data[root_sheet][f"{prefix}con"] = raw_con
+
             for base_name, options in sorted(check_groups.items(), key=lambda it: natural_sort_key(it[0])):
                 checked_opts = [
                     opt for opt, cval in sorted(options.items(), key=lambda it: natural_sort_key(it[0]))
@@ -1465,9 +2108,10 @@ class MainWindow(QMainWindow):
             return self.field_mapping[scoped_key]
         if sys_key in self.field_mapping and self.field_mapping[sys_key]:
             return self.field_mapping[sys_key]
-        if '_' in sys_key:
-            copy_prefix, bare_field = sys_key.split('_', 1)
-            if self._get_root_survey_name(copy_prefix) == sheet_name:
+        if sys_key.lower().startswith(sheet_name.lower()):
+            m = re.match(rf'^({re.escape(sheet_name)}[\s_-]*\d+)_(.+)$', sys_key, re.IGNORECASE)
+            if m:
+                copy_prefix, bare_field = m.group(1), m.group(2)
                 root_scoped = f"{sheet_name}_{bare_field}"
                 if root_scoped in self.field_mapping and self.field_mapping[root_scoped]:
                     return f"{copy_prefix}_{self.field_mapping[root_scoped]}"
@@ -1600,6 +2244,21 @@ class MainWindow(QMainWindow):
 
         return export_data, system_to_target_header
 
+    def _get_preassigned_excel_row(self, pid: str) -> Optional[int]:
+        """Return preassigned Excel row (x + 1) using trailing/single participant index x, or None."""
+        s = str(pid).strip()
+        if not s:
+            return None
+        m_trailing = re.search(r'(\d+)$', s)
+        if m_trailing:
+            x = int(m_trailing.group(1))
+            return x + 1 if 1 <= x <= 100000 else None
+        nums = re.findall(r'\d+', s)
+        if len(nums) == 1:
+            x = int(nums[0])
+            return x + 1 if 1 <= x <= 100000 else None
+        return None
+
     def _export_excel_batch(
         self,
         participant_ids: List[str],
@@ -1648,6 +2307,11 @@ class MainWindow(QMainWindow):
                                     if v is not None and str(v).strip():
                                         header_to_col[str(v).strip()] = idx + 1
 
+                        if 'participant_id' not in header_to_col:
+                            col1_hdr = next((h for h, c in header_to_col.items() if c == 1), None)
+                            if col1_hdr and col1_hdr.lower().replace(' ', '').replace('_', '').replace('-', '') == 'participantid':
+                                header_to_col['participant_id'] = 1
+
                         for sys_k, target_h in system_to_target_header.items():
                             if target_h not in header_to_col:
                                 if sys_k in header_to_col:
@@ -1660,18 +2324,36 @@ class MainWindow(QMainWindow):
                                     sheet.range((1, next_col)).value = target_h
                                     header_to_col[target_h] = next_col
 
-                        target_row: Optional[int] = None
-                        r_idx = 2
-                        while True:
-                            cell_val = sheet.range(f'A{r_idx}').value
-                            if cell_val is None:
-                                break
-                            if self._normalize_excel_pid(cell_val) == str(pid):
-                                target_row = r_idx
-                                break
-                            r_idx += 1
+                        row_pid_map: Dict[int, str] = {}
+                        pid_to_row: Dict[str, int] = {}
+                        last_non_empty_row = 1
+                        last_used_row = sheet.used_range.last_cell.row
+                        if last_used_row >= 2:
+                            col_a_vals = sheet.range((2, 1), (last_used_row, 1)).value
+                            if not isinstance(col_a_vals, list):
+                                col_a_vals = [col_a_vals]
+                            for offset, cell_val in enumerate(col_a_vals):
+                                r_idx = 2 + offset
+                                norm_val = self._normalize_excel_pid(cell_val)
+                                if norm_val:
+                                    row_pid_map[r_idx] = norm_val
+                                    if norm_val not in pid_to_row:
+                                        pid_to_row[norm_val] = r_idx
+                                    last_non_empty_row = r_idx
 
-                        write_row = target_row if target_row is not None else r_idx
+                        norm_pid = self._normalize_excel_pid(pid)
+                        target_row: Optional[int] = pid_to_row.get(norm_pid)
+                        if target_row is None and norm_pid.isdigit():
+                            target_row = pid_to_row.get(str(int(norm_pid)))
+
+                        if target_row is not None:
+                            write_row = target_row
+                        else:
+                            preassigned = self._get_preassigned_excel_row(norm_pid)
+                            if preassigned is not None and preassigned not in row_pid_map:
+                                write_row = preassigned
+                            else:
+                                write_row = last_non_empty_row + 1
                     else:
                         if (
                             len(wb.sheets) == 1
@@ -1688,7 +2370,8 @@ class MainWindow(QMainWindow):
                             sheet.range((1, idx)).value = header_name
                             header_to_col[header_name] = idx
 
-                        write_row = 2
+                        preassigned = self._get_preassigned_excel_row(self._normalize_excel_pid(pid))
+                        write_row = preassigned if preassigned is not None else 2
 
                     for col_header, val in export_data.items():
                         c_idx = header_to_col.get(col_header)
@@ -1937,6 +2620,11 @@ class MainWindow(QMainWindow):
             return self.error_window(f"Source folder does not exist:\n{self.source_path}")
 
         self.field_mapping = self._load_field_mapping_for_extraction()
+        if self.active_config_name:
+            stored_co = self._load_condition_ordering_from_config(self.active_config_name)
+            if stored_co.get("mappings") or stored_co.get("mode") != "numerical":
+                self.condition_ordering = stored_co
+
         participant_ids = self.get_active_participant_ids()
         if not participant_ids:
             return self.error_window("Please enter at least one participant ID!")
@@ -1946,33 +2634,44 @@ class MainWindow(QMainWindow):
 
         try:
             existing_masterfile_pids = self._get_existing_masterfile_pids()
-            conflicting_pids = [pid for pid in participant_ids if pid in existing_masterfile_pids]
+            conflicting_pids = {
+                pid for pid in participant_ids
+                if pid in existing_masterfile_pids
+                or (pid.isdigit() and str(int(pid)) in existing_masterfile_pids)
+            }
 
-            pids_to_extract = list(participant_ids)
-            if conflicting_pids:
-                dlg = OverwriteResolutionDialog(
-                    existing_pids=conflicting_pids,
-                    title="Masterfile Records Already Exist",
-                    prompt="The following participant(s) already exist in your masterfile.\n"
-                           "Tick the participants you wish to overwrite (unticked will be skipped):",
-                    parent=self
-                )
-                if dlg.exec() != QDialog.DialogCode.Accepted:
-                    return
+            dlg = BatchParticipantSelectionDialog(
+                all_pids=participant_ids,
+                conflicting_pids=conflicting_pids,
+                parent=self
+            )
+            if dlg.exec() != QDialog.DialogCode.Accepted:
+                return
 
-                approved_overwrite = set(dlg.get_selected_pids())
-                pids_to_extract = [
-                    pid for pid in participant_ids
-                    if (pid not in conflicting_pids) or (pid in approved_overwrite)
-                ]
+            selected_set = set(dlg.get_selected_pids())
+            pids_to_extract = [pid for pid in participant_ids if pid in selected_set]
 
             if not pids_to_extract:
                 QMessageBox.information(self, "No Changes", "No participants selected to extract.")
                 return
 
+            pdf_fields_cache: Dict[str, Dict[str, str]] = {}
+            unmapped_conditions = self._find_unmapped_conditions(pids_to_extract, pdf_fields_cache)
+            if unmapped_conditions:
+                codes_str = ", ".join(f"'{c}' ({sv})" for sv, c in unmapped_conditions)
+                saved_co = self.editConditionOrdering(
+                    prepopulate_items=unmapped_conditions,
+                    prompt_reason=(
+                        f"Unmapped condition value(s) detected in PDFs: {codes_str}.\n"
+                        "Please assign each condition its column order (1, 2, 3...) and optional meaning before exporting:"
+                    )
+                )
+                if not saved_co:
+                    return
+
             all_sheet_data: Dict[str, Dict[str, Dict[str, Any]]] = {}
             for pid in pids_to_extract:
-                all_sheet_data[pid] = self._prepare_data_for_extraction(pid)
+                all_sheet_data[pid] = self._prepare_data_for_extraction(pid, fields_cache=pdf_fields_cache)
 
             confirmed, edited_data = self.showBatchExtractionPreviewDialog(all_sheet_data)
             if not confirmed:
@@ -2009,8 +2708,15 @@ class MainWindow(QMainWindow):
                 prefix = f"{clean_type}_"
 
                 check_matrix_bases: Set[str] = set()
+                has_unignored_con = False
                 for field_name in template_fields.keys():
                     if field_name.startswith('_') or field_name.split('.')[-1].startswith('_'):
+                        continue
+
+                    cm = match_con_field(field_name)
+                    if cm:
+                        if not cm.group(1):
+                            has_unignored_con = True
                         continue
 
                     m = match_canonical_field(field_name)
@@ -2028,6 +2734,9 @@ class MainWindow(QMainWindow):
                     else:
                         if field_name != 'participant_id':
                             expected.add(f"{prefix}{field_name}")
+
+                if has_unignored_con:
+                    expected.add(f"{prefix}con")
 
                 for base_name in check_matrix_bases:
                     expected.add(f"{prefix}{base_name}")
@@ -2106,13 +2815,15 @@ class MainWindow(QMainWindow):
         expected = self._get_expected_system_fields()
         root_order = self.get_configured_root_order()
 
-        sorted_expected = sorted(
-            expected,
-            key=lambda f: (
-                root_order.index(self._get_root_survey_name(f)) if self._get_root_survey_name(f) in root_order else 9999,
-                natural_sort_key(f)
-            )
-        )
+        def _mapping_sort_key(field_str: str) -> Tuple[int, List[Any]]:
+            matched_idx = 9999
+            for s_name in sorted(root_order, key=len, reverse=True):
+                if field_str.lower().startswith(s_name.lower()):
+                    matched_idx = root_order.index(s_name)
+                    break
+            return (matched_idx, natural_sort_key(field_str))
+
+        sorted_expected = sorted(expected, key=_mapping_sort_key)
 
         stored = self._load_mapping_from_config(self.active_config_name) if self.active_config_name else {}
         mapping = {f: stored.get(f, self.field_mapping.get(f, f)) for f in sorted_expected}
@@ -2229,6 +2940,7 @@ class MainWindow(QMainWindow):
 
         self.field_mapping = self._ensure_or_create_field_mapping()
         cfg.set(name, 'field_mapping_json', json.dumps(self.field_mapping, ensure_ascii=False))
+        cfg.set(name, 'condition_ordering_json', json.dumps(self.condition_ordering, ensure_ascii=False))
 
         write_config_atomically(cfg, get_config_path())
 
@@ -2266,6 +2978,7 @@ class MainWindow(QMainWindow):
 
         self.active_config_name = name
         self.field_mapping = self._load_mapping_from_config(name)
+        self.condition_ordering = self._load_condition_ordering_from_config(name)
         QMessageBox.information(self, "Success", f"Configuration snapshot '{name}' loaded successfully!")
 
     def enterWhatsThisMode(self) -> None:
