@@ -65,6 +65,7 @@ CANONICAL_PATTERN = re.compile(r'^(_)?(Text|Check)(\d+)(?:[._]([a-zA-Z0-9]+))?$'
 CON_FIELD_PATTERN = re.compile(r'^(_)?con(?:[._]([a-zA-Z0-9-]+))?$', re.IGNORECASE)
 INVALID_ID_CHARS_PATTERN = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 CONFIG_FILENAME = "survey_workbench.config"
+UNCHECKED_BUTTON_VALUES: Set[str] = {'', 'off', 'false', '0', 'no', 'n', 'unchecked', 'none', 'null'}
 
 
 def new_config_parser() -> ConfigParser:
@@ -75,6 +76,24 @@ def new_config_parser() -> ConfigParser:
 def set_item_read_only(item: QTableWidgetItem) -> None:
     """Configure a QTableWidgetItem as selectable and enabled, but read-only."""
     item.setFlags(Qt.ItemFlags(Qt.ItemFlag.ItemIsSelectable) | Qt.ItemFlag.ItemIsEnabled)
+
+
+def is_ignored_field_name(field_name: str) -> bool:
+    """Return True if the field or any segment in its hierarchy starts with '_' (NOT operator)."""
+    cleaned = str(field_name).strip().lstrip('\ufeff')
+    if not cleaned:
+        return False
+    return any(part.strip().lstrip('\ufeff').startswith('_') for part in cleaned.split('.'))
+
+
+def is_unchecked_button_value(val: Any) -> bool:
+    """Return True if a button/checkbox value represents an unchecked/off state."""
+    if val is None:
+        return True
+    s = str(val).strip()
+    if s.startswith('/'):
+        s = s[1:].strip()
+    return s.lower() in UNCHECKED_BUTTON_VALUES
 
 
 def get_config_path() -> str:
@@ -786,8 +805,7 @@ class MainWindow(QMainWindow):
         for raw_k, raw_v in sorted(fields.items(), key=lambda it: natural_sort_key(it[0])):
             m = match_con_field(raw_k)
             if m and m.group(2) is not None:
-                val = str(raw_v).strip()
-                if val != '' and val.lower() not in ('off', 'false', '0'):
+                if not is_unchecked_button_value(raw_v):
                     return m.group(2).strip()
         return ""
 
@@ -1542,21 +1560,25 @@ class MainWindow(QMainWindow):
             raise
 
     def _extract_pdf_form_fields(self, pdf_path: str) -> Dict[str, str]:
-        """Deep extract form fields, radio groups, /Opt values, and appearance states."""
+        """Deep extract form fields, radio groups, /Opt values, and widget /AS states."""
         try:
             reader = PdfReader(pdf_path)
         except Exception:
             return {}
 
         extracted: Dict[str, str] = {}
+        explicit_on_buttons: Set[str] = set()
+        explicit_off_buttons: Set[str] = set()
 
-        def resolve_opt_value(raw: Any, opt_list: Optional[List[Any]]) -> Any:
+        def resolve_opt_value(raw: Any, opt_list: Optional[List[Any]], allow_zero_index: bool = False) -> Any:
             if opt_list and raw is not None:
                 raw_str = str(raw).strip()
                 if raw_str.startswith('/'):
                     idx_str = raw_str[1:].strip()
                     if idx_str.isdigit():
                         idx = int(idx_str)
+                        if idx == 0 and not allow_zero_index:
+                            return raw
                         if 0 <= idx < len(opt_list):
                             opt_item = resolve_pdf_object(opt_list[idx])
                             if isinstance(opt_item, list) and opt_item:
@@ -1574,12 +1596,14 @@ class MainWindow(QMainWindow):
             text = str(resolved).strip()
             if text.startswith('/'):
                 unslashed = text[1:].strip()
+                if is_button and unslashed.lower() in UNCHECKED_BUTTON_VALUES:
+                    return ''
                 if unslashed.lower() in ('yes', 'on', 'true'):
                     return '1'
                 if unslashed.lower() in ('off', 'false'):
                     return ''
                 return unslashed
-            if is_button and text.lower() in ('off', 'false'):
+            if is_button and text.lower() in UNCHECKED_BUTTON_VALUES:
                 return ''
             if is_button and text.lower() in ('yes', 'on', 'true'):
                 return '1'
@@ -1589,15 +1613,43 @@ class MainWindow(QMainWindow):
             name: Any,
             value: Any,
             is_button: bool = False,
-            opt_list: Optional[List[Any]] = None
+            opt_list: Optional[List[Any]] = None,
+            allow_zero_opt: bool = False,
+            from_as: bool = False
         ) -> None:
             if not name:
                 return
             key = str(name).strip()
             if not key or key == 'File':
                 return
-            resolved_val = resolve_opt_value(value, opt_list) if is_button else value
+
+            if is_button and is_unchecked_button_value(value):
+                if from_as:
+                    explicit_off_buttons.add(key)
+                if key not in extracted:
+                    extracted[key] = ''
+                elif from_as and key not in explicit_on_buttons:
+                    # Widget explicitly reports /AS = /Off; clear any stale /V unless another widget is ON
+                    extracted[key] = ''
+                return
+
+            resolved_val = resolve_opt_value(value, opt_list, allow_zero_index=allow_zero_opt) if is_button else value
             val_str = clean_value(resolved_val, is_button=is_button)
+
+            if is_button and val_str == '':
+                if from_as:
+                    explicit_off_buttons.add(key)
+                if key not in extracted:
+                    extracted[key] = ''
+                return
+
+            if is_button and from_as:
+                explicit_on_buttons.add(key)
+
+            if is_button and not from_as and key in explicit_off_buttons and key not in explicit_on_buttons:
+                # Widget appearance explicitly says OFF; ignore stale /V
+                return
+
             if key not in extracted:
                 extracted[key] = val_str
             elif extracted[key] == '' and val_str != '':
@@ -1627,20 +1679,64 @@ class MainWindow(QMainWindow):
             opt_list = local_opt if isinstance(local_opt, list) else inherited_opt
             is_button = (ft == '/Btn') or ('/AS' in obj)
 
-            raw_v = resolve_pdf_object(obj.get('/V'))
-            raw_as = resolve_pdf_object(obj.get('/AS'))
-
-            if raw_as is not None and str(raw_as).strip() not in ('', '/Off'):
-                store_field(field_name, raw_as, is_button=True, opt_list=opt_list)
-            elif raw_v is not None and str(raw_v).strip() not in ('', '/Off'):
-                store_field(field_name, raw_v, is_button=is_button, opt_list=opt_list)
-            else:
-                store_field(field_name, '', is_button=is_button)
-
             kids = resolve_pdf_object(obj.get('/Kids'))
+            has_kids = isinstance(kids, list) and len(kids) > 0
+            allow_zero_opt = isinstance(opt_list, list) and len(opt_list) > 1 and has_kids
+
+            # Walk children first so leaf widget /AS states establish explicit ON/OFF ground truth
             if isinstance(kids, list):
                 for k_ref in kids:
                     walk_field_hierarchy(k_ref, field_name, ft, opt_list)
+
+            raw_as = resolve_pdf_object(obj.get('/AS'))
+            raw_v = resolve_pdf_object(obj.get('/V'))
+
+            if raw_as is not None:
+                store_field(
+                    field_name, raw_as, is_button=True, opt_list=opt_list,
+                    allow_zero_opt=allow_zero_opt, from_as=True
+                )
+            elif raw_v is not None:
+                store_field(
+                    field_name, raw_v, is_button=is_button, opt_list=opt_list,
+                    allow_zero_opt=allow_zero_opt, from_as=False
+                )
+            else:
+                if field_name and field_name not in extracted:
+                    extracted[field_name] = ''
+
+        def get_annot_full_name_and_meta(annot: Dict[str, Any]) -> Tuple[str, str, Optional[List[Any]]]:
+            names: List[str] = []
+            ft_found = ''
+            opt_found: Optional[List[Any]] = None
+            curr: Any = annot
+            visited: Set[int] = set()
+            depth = 0
+            while isinstance(curr, dict) and depth < 15:
+                obj_id = id(curr)
+                if obj_id in visited:
+                    break
+                visited.add(obj_id)
+
+                t_val = resolve_pdf_object(curr.get('/T'))
+                if t_val is not None:
+                    t_str = str(t_val).strip()
+                    if t_str:
+                        names.append(t_str)
+                if not ft_found:
+                    ft_val = resolve_pdf_object(curr.get('/FT'))
+                    if ft_val is not None:
+                        ft_found = str(ft_val).strip()
+                if opt_found is None:
+                    opt_val = resolve_pdf_object(curr.get('/Opt'))
+                    if isinstance(opt_val, list):
+                        opt_found = opt_val
+
+                curr = resolve_pdf_object(curr.get('/Parent'))
+                depth += 1
+
+            names.reverse()
+            return '.'.join(names), ft_found, opt_found
 
         try:
             root = resolve_pdf_object(reader.trailer.get('/Root', {}))
@@ -1657,20 +1753,6 @@ class MainWindow(QMainWindow):
             pass
 
         try:
-            acro_fields = reader.get_fields() or {}
-            for fname, fmeta in acro_fields.items():
-                if isinstance(fmeta, dict):
-                    ft = str(resolve_pdf_object(fmeta.get('/FT', '')))
-                    opt_raw = resolve_pdf_object(fmeta.get('/Opt'))
-                    opt_list = opt_raw if isinstance(opt_raw, list) else None
-                    is_btn = ft == '/Btn'
-                    v = resolve_pdf_object(fmeta.get('/V'))
-                    if v is not None and str(v).strip() not in ('', '/Off'):
-                        store_field(fname, v, is_button=is_btn, opt_list=opt_list)
-        except Exception:
-            pass
-
-        try:
             for page in reader.pages:
                 annots = resolve_pdf_object(page.get('/Annots'))
                 if not isinstance(annots, list):
@@ -1683,32 +1765,47 @@ class MainWindow(QMainWindow):
                         subtype = str(resolve_pdf_object(annot.get('/Subtype', '')))
                         if subtype != '/Widget':
                             continue
-                        fname_raw = resolve_pdf_object(annot.get('/T'))
-                        parent = resolve_pdf_object(annot.get('/Parent'))
-                        if fname_raw is None and isinstance(parent, dict):
-                            fname_raw = resolve_pdf_object(parent.get('/T'))
-                        if fname_raw is not None:
-                            ft_raw = resolve_pdf_object(annot.get('/FT'))
-                            if not ft_raw and isinstance(parent, dict):
-                                ft_raw = resolve_pdf_object(parent.get('/FT'))
-                            ft = str(ft_raw) if ft_raw else ''
+                        full_name, ft, opt_list = get_annot_full_name_and_meta(annot)
+                        if not full_name:
+                            continue
+                        is_btn = (ft == '/Btn') or ('/AS' in annot)
+                        allow_zero_opt = isinstance(opt_list, list) and len(opt_list) > 1
 
-                            opt_raw = resolve_pdf_object(annot.get('/Opt'))
-                            if not isinstance(opt_raw, list) and isinstance(parent, dict):
-                                opt_raw = resolve_pdf_object(parent.get('/Opt'))
-                            opt_list = opt_raw if isinstance(opt_raw, list) else None
-                            is_btn = (ft == '/Btn') or ('/AS' in annot)
-
-                            val_as = resolve_pdf_object(annot.get('/AS'))
-                            val_v = resolve_pdf_object(annot.get('/V'))
-                            if val_as is not None and str(val_as).strip() not in ('', '/Off'):
-                                store_field(fname_raw, val_as, is_button=True, opt_list=opt_list)
-                            elif val_v is not None and str(val_v).strip() not in ('', '/Off'):
-                                store_field(fname_raw, val_v, is_button=is_btn, opt_list=opt_list)
+                        val_as = resolve_pdf_object(annot.get('/AS'))
+                        val_v = resolve_pdf_object(annot.get('/V'))
+                        if val_as is not None:
+                            store_field(
+                                full_name, val_as, is_button=True, opt_list=opt_list,
+                                allow_zero_opt=allow_zero_opt, from_as=True
+                            )
+                        elif val_v is not None:
+                            store_field(
+                                full_name, val_v, is_button=is_btn, opt_list=opt_list,
+                                allow_zero_opt=allow_zero_opt, from_as=False
+                            )
+                        elif full_name not in extracted:
+                            extracted[full_name] = ''
                     except Exception:
                         continue
         except Exception:
             pass
+
+        if not extracted:
+            try:
+                acro_fields = reader.get_fields() or {}
+                for fname, fmeta in acro_fields.items():
+                    if isinstance(fmeta, dict):
+                        ft = str(resolve_pdf_object(fmeta.get('/FT', '')))
+                        opt_raw = resolve_pdf_object(fmeta.get('/Opt'))
+                        opt_list = opt_raw if isinstance(opt_raw, list) else None
+                        is_btn = ft == '/Btn'
+                        v = resolve_pdf_object(fmeta.get('/V'))
+                        if v is not None:
+                            store_field(fname, v, is_button=is_btn, opt_list=opt_list)
+                        else:
+                            extracted.setdefault(str(fname).strip(), '')
+            except Exception:
+                pass
 
         return extracted
 
@@ -1776,14 +1873,14 @@ class MainWindow(QMainWindow):
                     val = str(defaults[field_name])
                     m = match_canonical_field(field_name)
                     if m:
-                        is_ignored = bool(m.group(1))
+                        is_ignored = bool(m.group(1)) or is_ignored_field_name(field_name)
                         kind = m.group(2).capitalize()
                         group_i = m.group(3)
                         opt_n = m.group(4)
                         if kind == 'Check' and opt_n is not None:
                             base_name = f"{'_' if is_ignored else ''}Check{group_i}"
                             group_opts = check_matrix_groups.setdefault(base_name, {})
-                            if val != '' or group_opts.get(opt_n, '') == '':
+                            if not is_unchecked_button_value(val) or group_opts.get(opt_n, '') == '':
                                 group_opts[opt_n] = val
                         else:
                             text_fields[field_name] = val
@@ -1800,7 +1897,7 @@ class MainWindow(QMainWindow):
                     display_name = self.field_mapping.get(system_key, self.field_mapping.get(base_name, base_name))
                     checked_opt = next((
                         opt for opt, cval in sorted(options.items(), key=lambda it: natural_sort_key(it[0]))
-                        if str(cval).strip() != '' and str(cval).strip().lower() not in ('off', 'false')
+                        if not is_unchecked_button_value(cval)
                     ), '')
                     rows.append((participant_id, file_label, base_name, display_name, checked_opt))
 
@@ -1862,7 +1959,7 @@ class MainWindow(QMainWindow):
 
                 survey_type = self._strip_pid_from_stem(os.path.splitext(file_name)[0], pid)
                 new_name = name_item.text().strip()
-                if new_name and not underlying_field_name.startswith('_') and not underlying_field_name.split('.')[-1].startswith('_'):
+                if new_name and not is_ignored_field_name(underlying_field_name):
                     sys_map_key = f"{survey_type}_{underlying_field_name}"
                     if new_name != original_displayed.get((survey_type, underlying_field_name)) or sys_map_key not in self.field_mapping:
                         self.field_mapping[sys_map_key] = new_name
@@ -1874,7 +1971,8 @@ class MainWindow(QMainWindow):
                     for raw_f in raw_fields:
                         m = match_canonical_field(raw_f)
                         if m and m.group(4) is not None:
-                            f_base = f"{'_' if m.group(1) else ''}Check{m.group(3)}"
+                            is_raw_ignored = bool(m.group(1)) or is_ignored_field_name(raw_f)
+                            f_base = f"{'_' if is_raw_ignored else ''}Check{m.group(3)}"
                             if f_base == underlying_field_name:
                                 matched_matrix_fields.append((raw_f, m.group(4)))
 
@@ -2034,7 +2132,7 @@ class MainWindow(QMainWindow):
             has_unignored_con = False
 
             for raw_k, v in sorted(fields.items(), key=lambda it: natural_sort_key(it[0])):
-                if raw_k.startswith('_') or raw_k.split('.')[-1].startswith('_'):
+                if is_ignored_field_name(raw_k):
                     continue
 
                 cm = match_con_field(raw_k)
@@ -2058,13 +2156,12 @@ class MainWindow(QMainWindow):
                             base_name = f"Check{group_i}"
                             group_opts = check_groups.setdefault(base_name, {})
                             existing_v = group_opts.get(opt_n, '')
-                            if val != '' or existing_v == '':
-                                group_opts[opt_n] = val
+                            if not is_unchecked_button_value(val) or existing_v == '':
+                                group_opts[opt_n] = '' if is_unchecked_button_value(val) else val
                         else:
-                            val_lower = val.lower()
-                            if val == '' or val_lower in ('off', 'false'):
+                            if is_unchecked_button_value(val):
                                 final_val = '0'
-                            elif val_lower in ('1', 'yes', 'on', 'true') or val_lower == f"check{group_i}":
+                            elif val.lower() in ('1', 'yes', 'on', 'true') or val.lower() == f"check{group_i}":
                                 final_val = '1'
                             else:
                                 choice_m = re.search(
@@ -2094,7 +2191,7 @@ class MainWindow(QMainWindow):
             for base_name, options in sorted(check_groups.items(), key=lambda it: natural_sort_key(it[0])):
                 checked_opts = [
                     opt for opt, cval in sorted(options.items(), key=lambda it: natural_sort_key(it[0]))
-                    if str(cval).strip() != '' and str(cval).strip().lower() not in ('off', 'false')
+                    if not is_unchecked_button_value(cval)
                 ]
                 checked_val = ', '.join(checked_opts) if checked_opts else ''
                 sheet_data[root_sheet][f"{prefix}{base_name}"] = checked_val
@@ -2710,7 +2807,7 @@ class MainWindow(QMainWindow):
                 check_matrix_bases: Set[str] = set()
                 has_unignored_con = False
                 for field_name in template_fields.keys():
-                    if field_name.startswith('_') or field_name.split('.')[-1].startswith('_'):
+                    if is_ignored_field_name(field_name):
                         continue
 
                     cm = match_con_field(field_name)
