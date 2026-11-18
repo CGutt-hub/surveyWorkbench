@@ -11,9 +11,9 @@ A desktop workbench for study coordinators and researchers. Prepare standardized
   - **Apache Parquet (`.parquet`):** High-speed columnar storage optimized for data science pipelines (Python, R, Polars, DuckDB, Julia).
   - **Delimited Text (`.csv`, `.tsv`, `.tab`):** Standard comma- or tab-separated tables with zero third-party dependencies.
   - **Structured JSON (`.json`):** Human-readable, structured data arrays.
-- **Canonical Grammar Consolidation:** Automatically groups checkbox arrays (like `Check1_1`, `Check1_2`) into a single column (`Check1`) containing the chosen option identifier `n`.
-- **Ignore / NOT Operator (`_`):** Any field prefixed with an underscore is omitted from masterfile exports.
-- **Condition Ordering (`con` Field):** Supports counterbalanced / mixed-order repeated surveys via a dedicated `con` (or `_con`) PDF field and **File -> Save/Edit Condition Ordering** (Numerical as standard, or custom mappings & meanings saved to `survey_workbench.config`).
+- **Canonical Grammar Consolidation:** Automatically groups checkbox arrays (like `Check1_1`, `Check1_2`) into a single column (`Check1`) containing only the ticked option identifier(s), ignoring unticked states (`Off`, `False`, `0`, `No`, `Aus`, `Nein`, etc.) and respecting PDF `/NeedAppearances`.
+- **Ignore / NOT Operator (`_` prefix or `_n` suffix):** Any field prefixed with a leading `_` (e.g., `_Text13`) or suffixed with `_n` (e.g., `Text13_n`) is omitted from masterfile exports.
+- **Condition Ordering (`con` Field):** Supports counterbalanced / mixed-order repeated surveys via a dedicated `con` (or `_con` / `con_n`) PDF field and **File -> Save/Edit Condition Ordering** (Numerical as standard, or custom mappings & meanings saved to `survey_workbench.config`).
 - **Filename-Driven Sheet Routing:** Automatically derives the masterfile sheet name directly from the PDF filename (e.g., `WaS3_001_nasa_1.pdf` -> `nasa`, `WaS3_002_you_are_an_idiot_34.pdf` -> `you_are_an_idiot`) and appends numbered copies (`nasa_1`, `nasa_2`, `nasa_3`, ...) horizontally in the same participant row.
 - **Preassigned Excel Row Placement (`x + 1`):** In Excel sheets, participant `x` (e.g., `1`, `P001`, `WaS3_001`) is always placed in row `x + 1` (row 2 for participant 1, row 3 for participant 2, etc.) rather than simply appending to the bottom.
 - **Consolidated Batch Processing & Interactive Selection:** Enter single IDs, paste multiple IDs, or import participant lists from text or CSV files. During extraction, an interactive checklist presents **all** participants in the batch (showing `New` vs `Already in Masterfile (will overwrite)`) so you can untick anyone you do not want to export.
@@ -24,7 +24,7 @@ A desktop workbench for study coordinators and researchers. Prepare standardized
 - **Natural Alphanumeric Sorting:** Columns and previews are sorted naturally (`Text1`, `Text2`, ..., `Text10`) instead of alphabetical order (`Text1`, `Text10`, `Text2`).
 - **Project Snapshotting:** Save and reload complete project setups (paths, templates, copy counts, custom column names, and condition orderings) to and from `survey_workbench.config`.
 - **Pre-Compiled & Cross-Platform:** Standalone Windows executable (.exe) ready to download without setup; native Linux binary easily built with Nuitka.
-- **Built-in Interactive Help:** Hover tooltips, a "What's This?" interactive click mode, and an in-app viewer for this documentation.
+- **Built-in Interactive Help & Diagnostics:** Hover tooltips, "What's This?" click mode, an in-app viewer for this manual, and **HELP -> Inspect PDF Form Fields...** to inspect raw PDF field states.
 
 ---
 
@@ -38,35 +38,35 @@ PDF form fields must adhere to the following specification:
 
 | Element | Description | Masterfile & Workflow Behavior |
 | :--- | :--- | :--- |
-| **`_`** | **NOT Operator** (optional leading underscore) | If present, the content of this field **does NOT get exported into the masterfile**. Ideal for administrative cover-page notes, visual participant ID labels, print-only metadata, or routing-only `_con` fields. |
+| **`_`** or **`_n`** | **NOT Operator** (leading `_` prefix or trailing `_n` suffix) | If a field (or any segment in its hierarchy) starts with `_` or ends with `_n` (e.g., `_Text13`, `Text13_n`, `_Check5_1`, `Check5_n`), it **does NOT get exported into the masterfile**. Ideal for administrative cover-page notes, visual participant ID labels, print-only metadata, or routing-only `_con` / `con_n` fields. |
 | **`{Check, Text}`** | **Entry Type** | Declares the input type. `Text` fields capture verbatim strings. `Check` fields represent boolean, binary, or nominal selection controls. |
 | **`<i>`** | **Field / Question Index** | Index number of the form question or condition. If option buttons belong to the same question, `i` stays constant while `n` changes. |
-| **`_n`** | **Option Identifier** (optional) | Specifies the choice identifier. In the masterfile, the cell shows **`n`** for column `Check<i>` if this option is chosen to be true. |
-| **`(_)con(_n)`** | **Condition Field** (optional, case-insensitive) | Declares the experimental condition of a repeated survey (text field, dropdown, radio group, or `con_<opt>` checkboxes) so mixed-order PDFs align cleanly in the masterfile row. Use `_con` to route without exporting a `con` column, or `con` to both route and export `<prefix>con`. |
+| **`_n` (numeric/option)** | **Option Identifier** (on `Check<i>_1`, `Check<i>_2`, ...) | Specifies the choice identifier. In the masterfile, the cell shows **`n`** for column `Check<i>` if that specific box is checked. (Note: literal `_n` at the end is treated as the NOT/ignore suffix.) |
+| **`(_)con(_n)`** | **Condition Field** (optional, case-insensitive) | Declares the experimental condition of a repeated survey (text field, dropdown, radio group, or `con_<opt>` checkboxes) so mixed-order PDFs align cleanly in the masterfile row. Use `_con` (or `con_n`) to route without exporting a `con` column, or `con` to both route and export `<prefix>con`. |
 
 ### Concrete Examples:
 
 1. **Nominal / Likert Scales (`Check1_1` to `Check1_5`):**
    - Options are named `Check1_1`, `Check1_2`, `Check1_3`, `Check1_4`, `Check1_5`.
    - If the participant selects the 3rd box (`Check1_3`), the masterfile stores `3` in the column **`Check1`**.
-   - No individual `Check1_1`, `Check1_2`, etc. columns clutter your masterfile.
+   - Unticked boxes (`Off`, `False`, `No`, `0`, `Aus`, `Nein`, etc.) are ignored; no individual `Check1_1`, `Check1_2`, etc. columns clutter your masterfile.
 2. **Binary Conditions (`Check2_0` and `Check2_1`):**
    - Canonically, `0` represents False/No and `1` represents True/Yes.
    - If the participant checks `Check2_0`, the masterfile records **`0`** in column **`Check2`**.
    - If the participant checks `Check2_1`, the masterfile records **`1`** in column **`Check2`**.
 3. **Standalone Checkbox (`Check3`):**
-   - A single boolean checkbox without an `_n` suffix.
+   - A single boolean checkbox without an option suffix.
    - If checked, the cell records **`1`**; if unchecked, it records **`0`**.
-4. **Ignored Cover Fields (`_Text13` or `_Check5_1`):**
-   - Prefixed with the leading `_` NOT operator.
-   - Can be prefilled with the participant ID during folder generation so that it is printed on the physical survey form, but is completely omitted during extraction into the masterfile.
+4. **Ignored Cover Fields (`_Text13`, `Text13_n`, `_Check5_1`, `Check5_n`):**
+   - Marked with a leading `_` or trailing `_n`.
+   - Can still be prefilled with the participant ID during folder generation so that it appears on the PDF form, but is completely omitted during extraction into the masterfile.
 5. **Counterbalanced Condition Routing (`con` / `_con` / `con_sf`):**
    - Suppose Participant 1 receives `WaS3_001_nasa_1.pdf` (`con = 2` or `con = sf`) and `WaS3_001_nasa_2.pdf` (`con = 1` or `con = bl`).
    - With numerical `con` (or `bl` = Order `1`, `sf` = Order `2` configured in **File -> Save/Edit Condition Ordering**), `nasa_2.pdf` is routed into `nasa_1_*` (first block) and `nasa_1.pdf` is routed into `nasa_2_*` (second block), keeping every participant aligned by condition in the masterfile.
-   - If prefixed with `_` (`_con`), the field is used strictly for ordering and omitted from the exported columns.
+   - If marked as `_con` (or `con_n`), the field is used strictly for ordering and omitted from the exported columns.
 
 ### Zero-Redundancy in Pop-Up Tables:
-All pop-up tables (Save/Edit Field Mapping, Batch Generation Prefill, and Extraction Review) automatically consolidate all `Check<i>_n` fields into a single `Check<i>` entry. Defining names or mappings for every individual option `n` is completely eliminated.
+All pop-up tables (Save/Edit Field Mapping, Batch Generation Prefill, and Extraction Review) automatically consolidate all `Check<i>_1..k` fields into a single `Check<i>` entry. Defining names or mappings for every individual option is completely eliminated.
 
 ---
 
@@ -95,11 +95,12 @@ Tip: Go to **File -> Save Configuration** to save this setup (including field ma
 
 ---
 
-## 4. Interactive Help in the App
+## 4. Interactive Help & Diagnostics in the App
 
 - **Hover:** Move your mouse over a control to see its tooltip.
 - **What's This? Mode:** Press Shift + F1 (or go to HELP -> What's This?). Click any control to read an explanation of its function.
 - **Read Manual:** Go to HELP -> User Manual to open this documentation directly inside the program.
+- **Inspect PDF Form Fields:** Go to **HELP -> Inspect PDF Form Fields...** to open any PDF and view each field's raw `/FT`, `/V`, `/AS`, `/AP /N` states, and extracted value.
 
 ---
 
@@ -116,16 +117,27 @@ Tip: Go to **File -> Save Configuration** to save this setup (including field ma
 
 ---
 
-## 6. Technical Specifications & Dependencies
+## 6. Technical Specifications & Source Layout
 
 - **Supported OS:** Windows 10/11, Linux, macOS
 - **Python Runtime:** Python 3.9 through 3.13
 - **GUI Framework:** PyQt5
-- **PDF Processing:** pypdf (AcroForm, widget annotations, indirect object trees)
+- **PDF Processing:** pypdf (AcroForm, widget annotations, `/NeedAppearances`, indirect object trees)
 - **Masterfile Formats:** Apache Parquet (`.parquet`), Excel (`.xlsx`, `.xls`), CSV (`.csv`), TSV (`.tsv`), JSON (`.json`)
 - **Parquet Engine:** `pyarrow` (recommended) or `pandas`
 - **Configuration File:** `survey_workbench.config` (stored in application root)
 - **Standalone Builds:** Nuitka (portable .exe on Windows / ELF binary on Linux)
+
+### Source Modules (all in the same folder):
+- `survey_workbench.py` — Main application window and entry point (`python survey_workbench.py`)
+- `study_workflows.py` — Folder generation, extraction, and configuration snapshotting workflows
+- `data_extraction.py` — Canonical grammar parsing, `con` slot routing, and export row building
+- `pdf_handler.py` — PDF form reading, writing, and raw field inspection
+- `exporters.py` — Excel (`x + 1` row placement), Parquet, CSV/TSV, and JSON batch writers
+- `dialogs.py` — Manual viewer, overwrite/batch selection checklists, config save dialog, and PDF inspector
+- `mapping_dialogs.py` — Field mapping and condition ordering editors
+- `preview_dialogs.py` — Consolidated batch generation prefill and extraction preview dialogs
+- `config_utils.py` — Shared patterns, config I/O, sorting, and path helpers
 
 To install all dependencies:
 ```bash
@@ -136,12 +148,14 @@ pip install pyarrow xlwings pypdf PyQt5
 
 ## 7. Compilation with Nuitka
 
+Run from the folder containing `survey_workbench.py`, its companion `.py` modules, and `README.md` (Nuitka automatically bundles all imported local modules):
+
 ### Windows Build Command:
 ```cmd
-python -m nuitka --standalone --onefile --enable-plugin=pyqt5 --include-data-file=README.md=README.md --windows-console-mode=disable --output-filename=survey_workbench.exe survey_workbench_v2.2.py
+python -m nuitka --standalone --onefile --enable-plugin=pyqt5 --include-data-file=README.md=README.md --windows-console-mode=disable --output-filename=survey_workbench.exe survey_workbench.py
 ```
 
 ### Linux Build Command:
 ```bash
-python3 -m nuitka --standalone --onefile --enable-plugin=pyqt5 --include-data-file=README.md=README.md --output-filename=survey_workbench survey_workbench_v2.2.py
+python -m nuitka --standalone --onefile --enable-plugin=pyqt5 --include-data-file=README.md=README.md --output-filename=survey_workbench survey_workbench.py
 ```
