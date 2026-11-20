@@ -181,6 +181,9 @@ def prepare_data_for_extraction(
         parsed_files.append((pdf_file, clean_type, root_sheet, fields, raw_con, slot))
         root_counts[root_sheet] = root_counts.get(root_sheet, 0) + 1
 
+    if not parsed_files:
+        raise ValueError(f"No readable PDF form fields found for participant '{participant_id}'.")
+
     parsed_files.sort(key=lambda item: (item[5] if item[5] is not None else 999999, natural_sort_key(item[0])))
 
     sheet_data: Dict[str, Dict[str, Any]] = {}
@@ -246,7 +249,7 @@ def prepare_data_for_extraction(
                         if final_val != '0' or existing_check == '' or val == '0':
                             sheet_data[root_sheet][target_key] = final_val
                 else:
-                    target_key = f"{prefix}Text{group_i}"
+                    target_key = f"{prefix}Text{group_i}_{opt_n}" if opt_n is not None else f"{prefix}Text{group_i}"
                     if val != '' or target_key not in sheet_data[root_sheet]:
                         sheet_data[root_sheet][target_key] = val
             else:

@@ -81,7 +81,7 @@ def show_batch_generation_prefill_dialog(
                     kind = m.group(2).capitalize()
                     group_i = m.group(3)
                     opt_n = m.group(4)
-                    if kind == 'Check' and opt_n is not None:
+                    if kind == 'Check' and opt_n is not None and opt_n.lower() != 'n':
                         base_name = f"{'_' if is_ignored else ''}Check{group_i}"
                         group_opts = check_matrix_groups.setdefault(base_name, {})
                         if not is_unchecked_button_value(val) or group_opts.get(opt_n, '') == '':
@@ -175,7 +175,7 @@ def show_batch_generation_prefill_dialog(
             if clean_underlying.startswith('Check') and ('_' not in clean_underlying and '.' not in clean_underlying):
                 for raw_f in raw_fields:
                     m = match_canonical_field(raw_f)
-                    if m and m.group(4) is not None:
+                    if m and m.group(4) is not None and m.group(4).lower() != 'n':
                         is_raw_ignored = bool(m.group(1)) or is_ignored_field_name(raw_f)
                         f_base = f"{'_' if is_raw_ignored else ''}Check{m.group(3)}"
                         if f_base == underlying_field_name:

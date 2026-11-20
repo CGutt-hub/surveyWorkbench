@@ -14,7 +14,7 @@ from PyQt5.QtCore import Qt
 # CANONICAL FORM FIELD GRAMMAR:
 #   (_){Check, Text}i(_n)
 #
-#   (_) / _n suffix : NOT operator. If present (leading '_' or trailing '_n'),
+#   (_) / _n suffix : NOT operator. If present (leading '_' or '_n' operator),
 #                     the field is strictly ignored and NOT exported.
 #   {Check, Text}   : Declares entry type. 'Text' is string; 'Check' is boolean/nominal.
 #   i               : Index of the condition/question (stays constant across options n).
@@ -24,8 +24,12 @@ from PyQt5.QtCore import Qt
 #   (_)con(_n)      : Optional condition declaration field used to order mixed-condition
 #                     surveys (e.g., nasa_1, nasa_2, nasa_3) consistently in the row.
 # ==============================================================================
-CANONICAL_PATTERN = re.compile(r'^(_)?(Text|Check)(\d+)(?:[._]([a-zA-Z0-9]+))?$', re.IGNORECASE)
-CON_FIELD_PATTERN = re.compile(r'^(_)?con(?:[._]([a-zA-Z0-9-]+))?$', re.IGNORECASE)
+CANONICAL_PATTERN = re.compile(r'^(_)?(Text|Check)(\d+)(?:[._]([a-zA-Z0-9-]+))?$', re.IGNORECASE)
+CON_FIELD_PATTERN = re.compile(r'^(_)?con(?:_n)?(?:[._](?!n$)([a-zA-Z0-9-]+?))?(?:_n)?$', re.IGNORECASE)
+IGNORED_MID_N_PATTERN = re.compile(
+    r'^(?:text|check|con)(?:\d*_n(?:[._-].*)?|_n\d+(?:[._-].*)?)$',
+    re.IGNORECASE
+)
 INVALID_ID_CHARS_PATTERN = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 CONFIG_FILENAME = "survey_workbench.config"
 UNCHECKED_BUTTON_VALUES: Set[str] = {
@@ -45,16 +49,25 @@ def set_item_read_only(item: QTableWidgetItem) -> None:
 
 
 def decode_pdf_scalar(val: Any) -> str:
-    """Safely convert a resolved PDF scalar (including bytes/ByteStringObject) to str."""
+    """Safely convert a resolved PDF scalar (including bytes/UTF-16/ByteStringObject) to str."""
     if val is None:
         return ''
     if isinstance(val, bytes):
-        return val.decode('utf-8', errors='ignore').strip()
-    return str(val).strip()
+        if val.startswith(b'\xfe\xff'):
+            text = val[2:].decode('utf-16-be', errors='ignore')
+        elif val.startswith(b'\xff\xfe'):
+            text = val[2:].decode('utf-16-le', errors='ignore')
+        else:
+            try:
+                text = val.decode('utf-8')
+            except UnicodeDecodeError:
+                text = val.decode('latin-1', errors='ignore')
+        return text.replace('\x00', '').strip()
+    return str(val).replace('\x00', '').strip()
 
 
 def is_ignored_field_name(field_name: str) -> bool:
-    """Return True if the field or any hierarchy segment starts with '_' or ends with '_n' (NOT operator)."""
+    """Return True if the field or any hierarchy segment uses the '_' or '_n' NOT operator."""
     cleaned = str(field_name).strip().lstrip('\ufeff')
     if not cleaned:
         return False
@@ -62,7 +75,7 @@ def is_ignored_field_name(field_name: str) -> bool:
         p = part.strip().lstrip('\ufeff')
         if not p:
             continue
-        if p.startswith('_') or p.lower().endswith('_n'):
+        if p.startswith('_') or p.lower().endswith('_n') or IGNORED_MID_N_PATTERN.match(p):
             return True
     return False
 

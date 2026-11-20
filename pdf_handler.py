@@ -133,14 +133,15 @@ def extract_pdf_form_fields(pdf_path: str) -> Dict[str, str]:
     """Deep extract form fields, radio groups, /Opt values, and widget /AS states."""
     try:
         reader = PdfReader(pdf_path)
+        if getattr(reader, "is_encrypted", False):
+            try:
+                reader.decrypt("")
+            except Exception:
+                return {}
     except Exception:
         return {}
 
-    extracted: Dict[str, str] = {}
-    explicit_on_buttons: Set[str] = set()
-    explicit_off_buttons: Set[str] = set()
     need_appearances = False
-
     try:
         root = resolve_pdf_object(reader.trailer.get('/Root', {}))
         if isinstance(root, dict):
@@ -151,92 +152,139 @@ def extract_pdf_form_fields(pdf_path: str) -> Dict[str, str]:
     except Exception:
         pass
 
-    def resolve_opt_value(raw: Any, opt_list: Optional[List[Any]], allow_zero_index: bool = False) -> Any:
+    field_records: Dict[str, Dict[str, Any]] = {}
+    visited_obj_keys: Set[Any] = set()
+    kept_refs: List[Any] = []
+
+    def _mark_visited(obj_ref: Any, resolved_obj: Any) -> bool:
+        iref = getattr(obj_ref, 'indirect_reference', None) or getattr(resolved_obj, 'indirect_reference', None)
+        if iref is not None:
+            marker: Any = ('iref', iref.idnum, iref.generation)
+        else:
+            marker = ('id', id(resolved_obj))
+            kept_refs.append(resolved_obj)
+        if marker in visited_obj_keys:
+            return False
+        visited_obj_keys.add(marker)
+        return True
+
+    def _get_ap_states(obj: Dict[str, Any]) -> Set[str]:
+        ap_dict = resolve_pdf_object(obj.get('/AP'))
+        if not isinstance(ap_dict, dict):
+            return set()
+        ap_n = resolve_pdf_object(ap_dict.get('/N'))
+        if not isinstance(ap_n, dict):
+            return set()
+        return {str(k).lstrip('/').strip().lower() for k in ap_n.keys()}
+
+    def _ensure_record(key: str, is_button: bool) -> Dict[str, Any]:
+        rec = field_records.get(key)
+        if rec is None:
+            rec = {
+                "is_button": is_button,
+                "v_entries": [],
+                "as_entries": [],
+                "ap_states": set(),
+            }
+            field_records[key] = rec
+        elif is_button:
+            rec["is_button"] = True
+        return rec
+
+    def _record_node(
+        key: str,
+        is_button: bool,
+        raw_v: Any,
+        raw_as: Any,
+        opt_list: Optional[List[Any]],
+        ap_states: Set[str]
+    ) -> None:
+        if not key or key == 'File':
+            return
+        rec = _ensure_record(key, is_button)
+        rec["ap_states"].update(ap_states)
+        if raw_v is not None:
+            rec["v_entries"].append((raw_v, opt_list, ap_states))
+        if raw_as is not None:
+            rec["as_entries"].append((raw_as, opt_list, ap_states))
+
+    def _resolve_opt_index(raw: Any, opt_list: Optional[List[Any]]) -> Tuple[bool, Any]:
         if opt_list and raw is not None:
             raw_str = decode_pdf_scalar(raw)
             if raw_str.startswith('/'):
                 idx_str = raw_str[1:].strip()
                 if idx_str.isdigit():
                     idx = int(idx_str)
-                    if idx == 0 and not allow_zero_index:
-                        return raw
                     if 0 <= idx < len(opt_list):
                         opt_item = resolve_pdf_object(opt_list[idx])
                         if isinstance(opt_item, list) and opt_item:
-                            return resolve_pdf_object(opt_item[0])
-                        return opt_item
-        return raw
+                            return True, resolve_pdf_object(opt_item[0])
+                        return True, opt_item
+        return False, raw
 
-    def clean_value(raw: Any, is_button: bool = False) -> str:
+    def _parse_button_val(
+        raw: Any,
+        opt_list: Optional[List[Any]],
+        ap_states: Set[str]
+    ) -> Tuple[bool, bool, str]:
+        resolved = resolve_pdf_object(raw)
+        if resolved is None:
+            return False, False, ''
+        if isinstance(resolved, ArrayObject):
+            on_parts: List[str] = []
+            saw_off = False
+            for item in resolved:
+                if item is None:
+                    continue
+                is_on, is_off, txt = _parse_button_val(item, opt_list, ap_states)
+                if is_on and txt:
+                    on_parts.append(txt)
+                elif is_off:
+                    saw_off = True
+            if on_parts:
+                return True, False, ', '.join(on_parts)
+            return False, saw_off, ''
+
+        via_opt, maybe_opt_val = _resolve_opt_index(resolved, opt_list)
+        if via_opt:
+            opt_txt = decode_pdf_scalar(maybe_opt_val)
+            if opt_txt.startswith('/'):
+                opt_txt = opt_txt[1:].strip()
+            if opt_txt and opt_txt.lower() != 'off':
+                return True, False, opt_txt
+            return False, True, ''
+
+        text = decode_pdf_scalar(resolved)
+        unslashed = text[1:].strip() if text.startswith('/') else text
+        ul = unslashed.lower()
+
+        if ul in ('', 'off', 'none', 'null'):
+            return False, True, ''
+
+        if ap_states and ul in ap_states and ul != 'off':
+            if ul in ('yes', 'on', 'true', 'ja', 'ein', 'wahr'):
+                return True, False, '1'
+            return True, False, unslashed
+
+        if ul in UNCHECKED_BUTTON_VALUES:
+            return False, True, ''
+
+        if ul in ('yes', 'on', 'true', 'ja', 'ein', 'wahr'):
+            return True, False, '1'
+
+        return True, False, unslashed
+
+    def _clean_text_val(raw: Any) -> str:
         resolved = resolve_pdf_object(raw)
         if resolved is None:
             return ''
         if isinstance(resolved, ArrayObject):
-            parts = [clean_value(x, is_button=is_button) for x in resolved if x is not None]
-            return ', '.join([p for p in parts if p != ''])
+            parts = [_clean_text_val(x) for x in resolved if x is not None]
+            return ', '.join(p for p in parts if p != '')
         text = decode_pdf_scalar(resolved)
         if text.startswith('/'):
-            unslashed = text[1:].strip()
-            if is_button and unslashed.lower() in UNCHECKED_BUTTON_VALUES:
-                return ''
-            if unslashed.lower() in ('yes', 'on', 'true', 'ja', 'ein', 'wahr'):
-                return '1'
-            if unslashed.lower() in ('off', 'false'):
-                return ''
-            return unslashed
-        if is_button and text.lower() in UNCHECKED_BUTTON_VALUES:
-            return ''
-        if is_button and text.lower() in ('yes', 'on', 'true', 'ja', 'ein', 'wahr'):
-            return '1'
+            return text[1:].strip()
         return text
-
-    def store_field(
-        name: Any,
-        value: Any,
-        is_button: bool = False,
-        opt_list: Optional[List[Any]] = None,
-        allow_zero_opt: bool = False,
-        from_as: bool = False
-    ) -> None:
-        if not name:
-            return
-        key = decode_pdf_scalar(name)
-        if not key or key == 'File':
-            return
-
-        if is_button and is_unchecked_button_value(value):
-            if from_as or need_appearances:
-                explicit_off_buttons.add(key)
-                if not from_as:
-                    explicit_on_buttons.discard(key)
-            if key not in extracted:
-                extracted[key] = ''
-            elif (from_as and key not in explicit_on_buttons) or (not from_as and need_appearances):
-                extracted[key] = ''
-            return
-
-        resolved_val = resolve_opt_value(value, opt_list, allow_zero_index=allow_zero_opt) if is_button else value
-        val_str = clean_value(resolved_val, is_button=is_button)
-
-        if is_button and val_str == '':
-            if from_as:
-                explicit_off_buttons.add(key)
-            if key not in extracted:
-                extracted[key] = ''
-            return
-
-        if is_button and from_as:
-            if need_appearances and key in explicit_off_buttons:
-                return
-            explicit_on_buttons.add(key)
-
-        if is_button and not from_as and not need_appearances and key in explicit_off_buttons and key not in explicit_on_buttons:
-            return
-
-        if key not in extracted:
-            extracted[key] = val_str
-        elif extracted[key] == '' and val_str != '':
-            extracted[key] = val_str
 
     def walk_field_hierarchy(
         obj_ref: Any,
@@ -244,10 +292,13 @@ def extract_pdf_form_fields(pdf_path: str) -> Dict[str, str]:
         inherited_ft: str = "",
         inherited_opt: Optional[List[Any]] = None,
         inherited_ff: int = 0
-    ) -> None:
+    ) -> Set[str]:
         obj = resolve_pdf_object(obj_ref)
         if not isinstance(obj, dict):
-            return
+            return set()
+        if not _mark_visited(obj_ref, obj):
+            return set()
+
         local_t = resolve_pdf_object(obj.get('/T'))
         local_name = decode_pdf_scalar(local_t)
         field_name = f"{inherited_name}.{local_name}" if (inherited_name and local_name) else (local_name or inherited_name)
@@ -262,37 +313,31 @@ def extract_pdf_form_fields(pdf_path: str) -> Dict[str, str]:
             ff = inherited_ff
 
         if ft == '/Btn' and (ff & 65536):
-            return
+            return set()
 
         local_opt = resolve_pdf_object(obj.get('/Opt'))
         opt_list = local_opt if isinstance(local_opt, list) else inherited_opt
         is_button = (ft == '/Btn') or ('/AS' in obj)
 
+        ap_states = _get_ap_states(obj)
         kids = resolve_pdf_object(obj.get('/Kids'))
-        has_kids = isinstance(kids, list) and len(kids) > 0
-        allow_zero_opt = isinstance(opt_list, list) and len(opt_list) > 1 and has_kids
-
         if isinstance(kids, list):
             for k_ref in kids:
-                walk_field_hierarchy(k_ref, field_name, ft, opt_list, ff)
+                ap_states.update(walk_field_hierarchy(k_ref, field_name, ft, opt_list, ff))
 
         raw_as = resolve_pdf_object(obj.get('/AS'))
         raw_v = resolve_pdf_object(obj.get('/V'))
+        _record_node(field_name, is_button, raw_v, raw_as, opt_list, ap_states)
+        return ap_states
 
-        if need_appearances and raw_v is not None:
-            store_field(field_name, raw_v, is_button=is_button, opt_list=opt_list, allow_zero_opt=allow_zero_opt, from_as=False)
-        elif raw_as is not None:
-            store_field(field_name, raw_as, is_button=True, opt_list=opt_list, allow_zero_opt=allow_zero_opt, from_as=True)
-        elif raw_v is not None:
-            store_field(field_name, raw_v, is_button=is_button, opt_list=opt_list, allow_zero_opt=allow_zero_opt, from_as=False)
-        elif field_name and field_name not in extracted:
-            extracted[field_name] = ''
-
-    def get_annot_full_name_and_meta(annot: Dict[str, Any]) -> Tuple[str, str, Optional[List[Any]], int]:
+    def get_annot_full_name_and_meta(
+        annot: Dict[str, Any]
+    ) -> Tuple[str, str, Optional[List[Any]], int, Any]:
         names: List[str] = []
         ft_found = ''
         opt_found: Optional[List[Any]] = None
         ff_found = 0
+        v_found: Any = None
         curr: Any = annot
         visited: Set[int] = set()
         depth = 0
@@ -319,12 +364,16 @@ def extract_pdf_form_fields(pdf_path: str) -> Dict[str, str]:
                         ff_found = int(ff_raw)
                     except (TypeError, ValueError):
                         pass
+            if v_found is None:
+                v_cand = resolve_pdf_object(curr.get('/V'))
+                if v_cand is not None:
+                    v_found = v_cand
 
             curr = resolve_pdf_object(curr.get('/Parent'))
             depth += 1
 
         names.reverse()
-        return '.'.join(names), ft_found, opt_found, ff_found
+        return '.'.join(names), ft_found, opt_found, ff_found, v_found
 
     try:
         root = resolve_pdf_object(reader.trailer.get('/Root', {}))
@@ -348,51 +397,101 @@ def extract_pdf_form_fields(pdf_path: str) -> Dict[str, str]:
                     annot = resolve_pdf_object(ref)
                     if not isinstance(annot, dict):
                         continue
+                    if not _mark_visited(ref, annot):
+                        continue
                     if decode_pdf_scalar(resolve_pdf_object(annot.get('/Subtype', ''))) != '/Widget':
                         continue
-                    full_name, ft, opt_list, ff = get_annot_full_name_and_meta(annot)
+                    full_name, ft, opt_list, ff, inherited_v = get_annot_full_name_and_meta(annot)
                     if not full_name or (ft == '/Btn' and (ff & 65536)):
                         continue
                     is_btn = (ft == '/Btn') or ('/AS' in annot)
-                    allow_zero_opt = isinstance(opt_list, list) and len(opt_list) > 1
-
+                    ap_states = _get_ap_states(annot)
                     val_as = resolve_pdf_object(annot.get('/AS'))
                     val_v = resolve_pdf_object(annot.get('/V'))
-                    if need_appearances and val_v is not None:
-                        store_field(full_name, val_v, is_button=is_btn, opt_list=opt_list, allow_zero_opt=allow_zero_opt, from_as=False)
-                    elif val_as is not None:
-                        store_field(full_name, val_as, is_button=True, opt_list=opt_list, allow_zero_opt=allow_zero_opt, from_as=True)
-                    elif val_v is not None:
-                        store_field(full_name, val_v, is_button=is_btn, opt_list=opt_list, allow_zero_opt=allow_zero_opt, from_as=False)
-                    elif full_name not in extracted:
-                        extracted[full_name] = ''
+                    if val_v is None:
+                        val_v = inherited_v
+                    _record_node(full_name, is_btn, val_v, val_as, opt_list, ap_states)
                 except Exception:
                     continue
     except Exception:
         pass
 
-    if not extracted:
-        try:
-            acro_fields = reader.get_fields() or {}
-            for fname, fmeta in acro_fields.items():
-                if isinstance(fmeta, dict):
-                    ft = decode_pdf_scalar(resolve_pdf_object(fmeta.get('/FT', '')))
-                    opt_raw = resolve_pdf_object(fmeta.get('/Opt'))
-                    opt_list = opt_raw if isinstance(opt_raw, list) else None
-                    is_btn = ft == '/Btn'
-                    v = resolve_pdf_object(fmeta.get('/V'))
-                    if v is not None:
-                        store_field(fname, v, is_button=is_btn, opt_list=opt_list)
-                    else:
-                        extracted.setdefault(str(fname).strip(), '')
-        except Exception:
-            pass
+    extracted: Dict[str, str] = {}
+    for key, rec in field_records.items():
+        if rec["is_button"]:
+            combined_ap: Set[str] = rec["ap_states"]
+            v_on_vals: List[str] = []
+            v_explicit_off = False
+            for raw_v, opt_list, local_ap in rec["v_entries"]:
+                is_on, is_off, txt = _parse_button_val(raw_v, opt_list, local_ap or combined_ap)
+                if is_on and txt:
+                    v_on_vals.append(txt)
+                elif is_off:
+                    v_explicit_off = True
+
+            as_on_vals: List[str] = []
+            for raw_as, opt_list, local_ap in rec["as_entries"]:
+                is_on, _is_off, txt = _parse_button_val(raw_as, opt_list, local_ap or combined_ap)
+                if is_on and txt:
+                    as_on_vals.append(txt)
+
+            if need_appearances:
+                if v_on_vals:
+                    extracted[key] = v_on_vals[0]
+                elif as_on_vals and not v_explicit_off:
+                    extracted[key] = as_on_vals[0]
+                else:
+                    extracted[key] = ''
+            else:
+                if as_on_vals:
+                    extracted[key] = as_on_vals[0]
+                elif v_on_vals:
+                    extracted[key] = v_on_vals[0]
+                else:
+                    extracted[key] = ''
+        else:
+            val_found = ''
+            for raw_v, _opt_list, _local_ap in rec["v_entries"]:
+                cand = _clean_text_val(raw_v)
+                if cand != '':
+                    val_found = cand
+                    break
+            extracted[key] = val_found
+
+    try:
+        acro_fields = reader.get_fields() or {}
+        for fname, fmeta in acro_fields.items():
+            key = decode_pdf_scalar(fname)
+            if not key or key == 'File' or not isinstance(fmeta, dict):
+                continue
+            if key in extracted and extracted[key] != '':
+                continue
+            ft = decode_pdf_scalar(resolve_pdf_object(fmeta.get('/FT', '')))
+            opt_raw = resolve_pdf_object(fmeta.get('/Opt'))
+            opt_list = opt_raw if isinstance(opt_raw, list) else None
+            is_btn = ft == '/Btn'
+            v = resolve_pdf_object(fmeta.get('/V'))
+            if v is not None:
+                if is_btn:
+                    is_on, _is_off, txt = _parse_button_val(v, opt_list, set())
+                    if is_on and txt:
+                        extracted[key] = txt
+                    elif key not in extracted:
+                        extracted[key] = ''
+                else:
+                    txt = _clean_text_val(v)
+                    if txt != '' or key not in extracted:
+                        extracted[key] = txt
+            elif key not in extracted:
+                extracted[key] = ''
+    except Exception:
+        pass
 
     return extracted
 
 
 def extract_condition_from_fields(fields: Dict[str, str]) -> str:
-    """Extract the condition declaration ('con' / '_con' / 'con_<opt>') from a PDF's fields."""
+    """Extract the condition declaration ('con' / '_con' / 'con_n' / 'con_<opt>') from a PDF's fields."""
     for raw_k, raw_v in sorted(fields.items(), key=lambda it: natural_sort_key(it[0])):
         m = match_con_field(raw_k)
         if m and m.group(2) is None:
@@ -409,7 +508,11 @@ def extract_condition_from_fields(fields: Dict[str, str]) -> str:
 
 def build_prefill_defaults(participant_id: str, fields: Dict[str, Any]) -> Dict[str, Any]:
     defaults: Dict[str, Any] = dict(fields)
-    participant_aliases = {"participant_id", "participant-id", "Text13", "_Text13", "Text1", "_Text1"}
+    participant_aliases = {
+        "participant_id", "participant-id",
+        "Text13", "_Text13", "Text13_n",
+        "Text1", "_Text1", "Text1_n",
+    }
     for field_name in fields.keys():
         clean_name = field_name.split('.')[-1].strip()
         if (clean_name in participant_aliases or "participant" in clean_name.lower()) and str(fields.get(field_name, "")).strip() == "":
@@ -420,6 +523,11 @@ def build_prefill_defaults(participant_id: str, fields: Dict[str, Any]) -> Dict[
 def inspect_pdf_raw_fields(pdf_path: str) -> List[Tuple[str, str, str, str, str, str]]:
     """Return raw diagnostic tuples (name, /FT, /V, /AS, /AP /N keys, extracted) for a PDF."""
     reader = PdfReader(pdf_path)
+    if getattr(reader, "is_encrypted", False):
+        try:
+            reader.decrypt("")
+        except Exception:
+            pass
     extracted = extract_pdf_form_fields(pdf_path)
     rows: List[Tuple[str, str, str, str, str, str]] = []
 
